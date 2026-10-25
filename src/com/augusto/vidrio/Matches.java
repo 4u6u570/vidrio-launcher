@@ -14,14 +14,14 @@ import java.util.Set;
 import java.util.TimeZone;
 
 /**
- * Football scores straight from ESPN's public scoreboard, the same source Salta News uses for
- * its live module. Asking ESPN directly costs Salta News nothing.
+ * Football scores straight from ESPN's public scoreboard, which needs no key and no server of
+ * our own in between.
  *
  * Shown: everything being played right now in the leagues below, plus every Boca and Inter
  * Miami match of the day, whatever its state. Boca and Inter Miami go first.
  */
 final class Matches {
-    /** ESPN code and the name shown. The MLS only for Inter Miami, as on Salta News. */
+    /** ESPN code and the name shown. The MLS only for Inter Miami: of its matches, that is the one. */
     private static final String[][] LEAGUES = {
             {"arg.1", "Liga Profesional"}, {"arg.copa_lpf", "Copa de la Liga"}, {"arg.copa", "Copa Argentina"},
             {"conmebol.libertadores", "Libertadores"}, {"conmebol.sudamericana", "Sudamericana"},
@@ -201,7 +201,7 @@ final class Matches {
 
     /**
      * Goals and red cards. ESPN files an own goal under the scorer's team; it counts for the
-     * other one, so it goes on that side, as on Salta News.
+     * other one, so it goes on that side.
      */
     private static List<Event> events(JSONArray details, String homeId, String awayId) {
         List<Event> list = new ArrayList<>();

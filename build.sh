@@ -1,6 +1,7 @@
 #!/bin/sh
 # Builds vidrio.apk with the bare Android SDK tools: no Gradle, no libraries.
-# The signing key lives in firma/ and stays out of git: without it, updates won't install over the app.
+# The signing key and its password live in firma/ and stay out of git: without them, updates
+# won't install over the app. The first build creates both, with a random password.
 set -e
 cd "$(dirname "$0")"
 
@@ -14,7 +15,8 @@ VERSION_NAME="${VERSION_NAME:-1.0}"
 
 if [ ! -f firma/vidrio.jks ]; then
     mkdir -p firma
-    keytool -genkeypair -keystore firma/vidrio.jks -alias vidrio -storepass vidrio-firma \
+    LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24 > firma/clave.txt
+    keytool -genkeypair -keystore firma/vidrio.jks -alias vidrio -storepass "$(cat firma/clave.txt)" \
         -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Vidrio" >/dev/null
 fi
 
@@ -29,5 +31,5 @@ javac -nowarn -Xlint:-options -source 8 -target 8 -bootclasspath "$JAR:$BT/core-
 "$BT/d8" --release --min-api 24 --lib "$JAR" --output build $(find build/classes -name '*.class')
 (cd build && zip -q unsigned.apk classes.dex)
 "$BT/zipalign" -f -p 4 build/unsigned.apk build/aligned.apk
-"$BT/apksigner" sign --ks firma/vidrio.jks --ks-pass pass:vidrio-firma --out vidrio.apk build/aligned.apk
+"$BT/apksigner" sign --ks firma/vidrio.jks --ks-pass file:firma/clave.txt --out vidrio.apk build/aligned.apk
 echo "vidrio.apk listo ($(du -h vidrio.apk | cut -f1))"

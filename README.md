@@ -24,7 +24,7 @@ Hacen falta el SDK de Android (build-tools 34 y la plataforma android-34) y un J
 VERSION_CODE=2 VERSION_NAME=1.1 ./build.sh  # para una versión nueva
 ```
 
-La primera vez, `build.sh` crea la clave de firma en `firma/`, que queda fuera de git. **Respaldala**: sin esa clave, una versión nueva no se instala encima de la anterior.
+La primera vez, `build.sh` crea la clave de firma y su contraseña en `firma/`, que queda fuera de git. **Respaldá esa carpeta**: sin la clave, una versión nueva no se instala encima de la anterior.
 
 ## Instalar y dejarlo como pantalla de inicio
 
@@ -35,3 +35,16 @@ adb shell cmd package set-home-activity com.augusto.vidrio/.MainActivity
 # deja leer la música de otras apps; este permiso de diagnóstico lo reemplaza.
 adb shell pm grant com.augusto.vidrio android.permission.DUMP
 ```
+
+## Fuentes de datos
+
+Vidrio no tiene servidor propio: cada dato se pide directo a su fuente, sin claves.
+
+- **Clima:** [Open-Meteo](https://open-meteo.com/), con datos bajo licencia [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- **Fondos:** [Wikimedia Commons](https://commons.wikimedia.org/). Cada foto lleva en pantalla su autor y su licencia.
+- **Fútbol:** el tablero público de ESPN. No es una API oficial: si ESPN la cambia, la pastilla del partido deja de aparecer y el resto sigue igual.
+- **Portadas de discos:** el buscador público de iTunes.
+
+## Licencia
+
+MIT. Ver [LICENSE](LICENSE).
