@@ -2,7 +2,7 @@
 
 ![Vidrio Launcher en un TV stick: reloj, clima, tarjeta de música y fila de favoritos sobre una foto de la galaxia del Sombrero](docs/captura.jpg)
 
-Launcher liviano para Android TV (Android 7 o más nuevo), con estilo de vidrio esmerilado al modo de Apple. El APK pesa unos 32 KB: está escrito en Java, sin bibliotecas y sin Gradle.
+Launcher liviano para Android TV (Android 7 o más nuevo), con estilo de vidrio esmerilado al modo de Apple. El APK pesa unos 60 KB: está escrito en Java, sin bibliotecas y sin Gradle.
 
 - Reloj, fecha y estado de la red arriba; botón de Ajustes. El centro queda libre.
 - Abajo, una sola fila de **favoritos**. Empieza con **Todas las apps**, que abre la grilla con todo lo instalado. Cada app nueva se suma sola al final de la fila. Las apps de TV muestran su banner.
