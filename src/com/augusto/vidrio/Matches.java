@@ -28,6 +28,8 @@ final class Matches {
             {"uefa.champions", "Champions"}, {"esp.1", "LaLiga"}, {"eng.1", "Premier League"},
             {"usa.1", "MLS"}};
     private static final String[] FAVORITE_TEAMS = {"Boca Juniors", "Inter Miami"};
+    /** The team that, when it plays, is the only match shown; set from the settings. */
+    static volatile String favoriteTeam = "Boca Juniors";
     /** Argentine clubs, to spot them in the continental cups, where the league says nothing. */
     private static final String[] ARGENTINE_CLUBS = {
             "Boca Juniors", "River Plate", "Racing", "Independiente", "San Lorenzo", "Estudiantes",
@@ -164,7 +166,8 @@ final class Matches {
                 JSONObject team = t.getJSONObject("team");
                 String full = team.optString("displayName");
                 for (String f : FAVORITE_TEAMS) if (full.contains(f)) favorite = true;
-                if (full.contains("Boca Juniors")) priority = 0;
+                String fav = favoriteTeam;
+                if (fav != null && full.contains(fav)) priority = 0;
                 else if (priority > 1 && (full.contains("Inter Miami") || isArgentine(full))) priority = 1;
                 String shortName = team.optString("shortDisplayName", full).trim();
                 Side s = new Side(team.optString("id"), shortName, team.optString("abbreviation", shortName), small(team.optString("logo")),

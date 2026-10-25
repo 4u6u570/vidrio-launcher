@@ -4,15 +4,15 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * The weather in Salta from Open-Meteo: free, no key. Now and the next seven days, in one
- * request. Call it off the main thread.
+ * The weather in a city, Salta unless set otherwise, from Open-Meteo: free, no key. Now and
+ * the next seven days, in one request. Call it off the main thread.
  */
 final class Weather {
     private static final String URL = "https://api.open-meteo.com/v1/forecast"
-            + "?latitude=-24.7859&longitude=-65.4117"
+            + "?latitude=%s&longitude=%s"
             + "&current=temperature_2m,weather_code,is_day"
             + "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
-            + "&timezone=America%2FArgentina%2FSalta&forecast_days=7";
+            + "&timezone=auto&forecast_days=7";
 
     static final class Day {
         /** "2026-10-25" */
@@ -39,8 +39,8 @@ final class Weather {
         this.days = days;
     }
 
-    static Weather fetch() throws Exception {
-        JSONObject r = new JSONObject(Net.text(URL));
+    static Weather fetch(double lat, double lon) throws Exception {
+        JSONObject r = new JSONObject(Net.text(String.format(java.util.Locale.US, URL, lat, lon)));
         JSONObject current = r.getJSONObject("current");
         JSONObject daily = r.getJSONObject("daily");
         JSONArray dates = daily.getJSONArray("time");

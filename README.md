@@ -11,6 +11,8 @@ Launcher liviano para Android TV (Android 7 o más nuevo), con estilo de vidrio 
 - **Clima de Salta:** temperatura actual, máxima y mínima, de Open-Meteo, cada 30 minutos. Con OK se abre el pronóstico de 7 días.
 - **Reproduciendo ahora:** un recuadro con la portada del disco, un ecualizador que se mueve mientras suena, el tema y el artista. La portada de Spotify sale del catálogo público de iTunes; en otras apps se muestra su ícono. Aparece si hay algo sonando o en pausa, y se queda una hora con el último tema. Con OK se abre la app.
 
+**Ajustes** abre la configuración del launcher: fondo y cada cuánto cambia, crédito de la foto, fútbol y equipo favorito, clima y ciudad, "Reproduciendo ahora" y cuánto queda el último tema, formato de la hora, y si las apps nuevas van a favoritos. La primera fila lleva a la configuración de Android.
+
 Los widgets solo consultan mientras el inicio está a la vista: con una app abierta, no gastan nada.
 
 ## Compilar

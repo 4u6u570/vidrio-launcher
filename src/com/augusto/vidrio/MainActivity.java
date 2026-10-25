@@ -89,8 +89,8 @@ public class MainActivity extends Activity {
     private final BroadcastReceiver clockReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             updateClock();
-            // A new photo every twenty minutes.
-            if (visible && java.util.Calendar.getInstance().get(java.util.Calendar.MINUTE) % 20 == 0) refreshWallpaper();
+            // Checks each minute whether the period for a new photo has run out; cheap.
+            if (visible) refreshWallpaper();
         }
     };
     private final BroadcastReceiver packageReceiver = new BroadcastReceiver() {
@@ -99,7 +99,7 @@ public class MainActivity extends Activity {
             String pkg = i.getData() == null ? null : i.getData().getSchemeSpecificPart();
             boolean fresh = Intent.ACTION_PACKAGE_ADDED.equals(i.getAction())
                     && !i.getBooleanExtra(Intent.EXTRA_REPLACING, false);
-            if (fresh && apps.containsKey(pkg)) {
+            if (fresh && apps.containsKey(pkg) && config.on(Config.AUTO_FAVORITES)) {
                 List<String> favs = favorites();
                 if (!favs.contains(pkg)) {
                     favs.add(pkg);
@@ -122,8 +122,10 @@ public class MainActivity extends Activity {
         tileW = (px(1920 - 2 * SIDE) - (COLUMNS - 1) * px(GAP)) / COLUMNS;
         tileH = tileW * 9 / 16;
         prefs = getSharedPreferences("vidrio", MODE_PRIVATE);
+        config = new Config(this);
+        Matches.favoriteTeam = Config.TEAM_NAMES[config.get(Config.TEAM)];
         wallpapers = new Wallpapers(this);
-        Wallpapers.Photo photo = GlassView.backdrop == null ? wallpapers.cached() : null;
+        Wallpapers.Photo photo = GlassView.backdrop == null && photos() ? wallpapers.cached() : null;
         if (photo != null) {
             GlassView.backdrop = new Backdrop(photo.bitmap, screenW(), screenH());
             photo.bitmap.recycle();
@@ -152,6 +154,7 @@ public class MainActivity extends Activity {
         credit = text(20, "sans-serif", 0xA6FFFFFF);
         credit.setGravity(Gravity.END);
         credit.setText(prefsCredit());
+        credit.setVisibility(photos() && config.on(Config.CREDIT) ? View.VISIBLE : View.GONE);
         FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(px(760), -2, Gravity.TOP | Gravity.END);
         cp.rightMargin = px(SIDE);
         cp.topMargin = px(178);
@@ -199,7 +202,9 @@ public class MainActivity extends Activity {
         updateClock();
         refreshWallpaper();
         refreshWeather();
-        nowPlaying.start();
+        nowPlaying.lingerMs = Config.LINGER_MINUTES[config.get(Config.LINGER)] * 60_000L;
+        if (config.on(Config.MUSIC)) nowPlaying.start();
+        else nowPlaying.setVisibility(View.GONE);
         main.removeCallbacks(pollMatches);
         refreshMatches();
     }
@@ -228,6 +233,7 @@ public class MainActivity extends Activity {
     private final Map<String, Bitmap> logos = new ConcurrentHashMap<>();
     private final Runnable pollMatches = this::refreshMatches;
     private Wallpapers wallpapers;
+    private Config config;
     private View wallpaperView;
     private TextView credit;
     private NowPlaying nowPlaying;
@@ -257,6 +263,11 @@ public class MainActivity extends Activity {
      * and never later than in fifteen minutes.
      */
     private void refreshMatches() {
+        if (!config.on(Config.FOOTBALL)) {
+            liveMatches = new ArrayList<>();
+            showLive();
+            return;
+        }
         if (fetchingMatches) return;
         fetchingMatches = true;
         worker.execute(() -> {
@@ -331,11 +342,17 @@ public class MainActivity extends Activity {
 
     /** Every half hour at most, and only while the launcher is on screen. */
     private void refreshWeather() {
+        View pill = (View) weather.getParent();
+        if (!config.on(Config.WEATHER)) {
+            pill.setVisibility(View.GONE);
+            return;
+        }
         if (System.currentTimeMillis() - weatherAt < 30 * 60_000) return;
+        double[] at = Config.CITY_COORDS[config.get(Config.CITY)];
         worker.execute(() -> {
             Weather w;
             try {
-                w = Weather.fetch();
+                w = Weather.fetch(at[0], at[1]);
             } catch (Exception e) {
                 return;
             }
@@ -349,12 +366,22 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** A new photo of Salta every twenty minutes; the glass follows the wallpaper. */
+    private boolean photos() {
+        return config.get(Config.WALLPAPER) == 0;
+    }
+
+    /** A new photo of Salta when its period runs out; the glass follows the wallpaper. */
     private void refreshWallpaper() {
+        refreshWallpaper(false);
+    }
+
+    private void refreshWallpaper(boolean force) {
+        if (!photos()) return;
+        int period = Config.PERIOD_MINUTES[config.get(Config.PERIOD)];
         worker.execute(() -> {
             Wallpapers.Photo photo;
             try {
-                photo = wallpapers.today(false);
+                photo = force ? wallpapers.today(true, period) : wallpapers.today(false, period);
             } catch (Exception e) {
                 return;
             }
@@ -362,26 +389,29 @@ public class MainActivity extends Activity {
             Backdrop backdrop = new Backdrop(photo.bitmap, screenW(), screenH());
             photo.bitmap.recycle();
             main.post(() -> {
-                if (isDestroyed()) return;
-                // The old photo stays on top for a moment and fades away over the new one.
-                android.graphics.Bitmap old = GlassView.backdrop.wallpaper;
-                View fading = new View(this) {
-                    final Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
-                    final Rect dst = new Rect();
-                    @Override protected void onDraw(Canvas c) {
-                        dst.set(0, 0, getWidth(), getHeight());
-                        c.drawBitmap(old, null, dst, p);
-                    }
-                };
-                root.addView(fading, 1, match());
-                GlassView.backdrop = backdrop;
+                if (isDestroyed() || !photos()) return;
+                swapBackdrop(backdrop);
                 credit.setText(photo.credit);
-                wallpaperView.invalidate();
-                GlassView.refresh(root);
-                fading.animate().alpha(0f).setDuration(1400)
-                        .withEndAction(() -> root.removeView(fading)).start();
             });
         });
+    }
+
+    /** The old wallpaper stays on top for a moment and fades away over the new one. */
+    private void swapBackdrop(Backdrop backdrop) {
+        android.graphics.Bitmap old = GlassView.backdrop.wallpaper;
+        View fading = new View(this) {
+            final Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
+            final Rect dst = new Rect();
+            @Override protected void onDraw(Canvas c) {
+                dst.set(0, 0, getWidth(), getHeight());
+                c.drawBitmap(old, null, dst, p);
+            }
+        };
+        root.addView(fading, 1, match());
+        GlassView.backdrop = backdrop;
+        wallpaperView.invalidate();
+        GlassView.refresh(root);
+        fading.animate().alpha(0f).setDuration(1400).withEndAction(() -> root.removeView(fading)).start();
     }
 
     private String prefsCredit() {
@@ -479,7 +509,7 @@ public class MainActivity extends Activity {
         row.addView(weatherPill, barItem());
 
 
-        View settings = pill("Ajustes", () -> openInPlace(new Intent(Settings.ACTION_SETTINGS)));
+        View settings = pill("Ajustes", this::openSettings);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, px(72));
         lp.leftMargin = px(20);
         row.addView(settings, lp);
@@ -536,7 +566,7 @@ public class MainActivity extends Activity {
 
     private void updateClock() {
         Date now = new Date();
-        time.setText(new SimpleDateFormat("HH:mm", ES).format(now));
+        time.setText(new SimpleDateFormat(config.get(Config.CLOCK) == 0 ? "HH:mm" : "h:mm", ES).format(now));
         date.setText(new SimpleDateFormat("EEEE d 'de' MMMM", ES).format(now));
     }
 
@@ -781,7 +811,7 @@ public class MainActivity extends Activity {
         panel.addView(column);
 
         TextView title = text(38, "sans-serif-medium", 0xFFFFFFFF);
-        title.setText("Salta · próximos 7 días");
+        title.setText(config.shown(Config.CITY) + " · próximos 7 días");
         column.addView(title);
 
         LinearLayout days = new LinearLayout(this);
@@ -829,6 +859,134 @@ public class MainActivity extends Activity {
         sheet.addView(panel, new FrameLayout.LayoutParams(px(1360), -2, Gravity.CENTER));
         root.addView(sheet, match());
         close.requestFocus();
+    }
+
+    /**
+     * The launcher's own settings: each row shows its value, and OK moves to the next one. Every
+     * change applies at once. The first row leads to Android's settings.
+     */
+    private void openSettings() {
+        sheetPackage = null;
+        newSheet();
+        GlassView panel = new GlassView(this, u, px(44));
+        panel.setElevation(px(30));
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setPadding(px(44), px(36), px(44), px(36));
+        panel.addView(column);
+
+        TextView title = text(38, "sans-serif-medium", 0xFFFFFFFF);
+        title.setText("Vidrio Launcher");
+        column.addView(title);
+
+        ScrollView scroll = new ScrollView(this) {
+            @Override protected void onScrollChanged(int l, int t, int ol, int ot) {
+                super.onScrollChanged(l, t, ol, ot);
+                GlassView.refresh(this);
+            }
+        };
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setClipChildren(false);
+        LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        rows.setClipChildren(false);
+        rows.setPadding(px(10), px(10), px(10), px(10));
+        scroll.addView(rows);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, px(700));
+        sp.topMargin = px(16);
+        column.addView(scroll, sp);
+
+        View first = settingRow(rows, "Configuración de Android", "›", null);
+        for (Config.Setting s : Config.ALL) settingRow(rows, s.label, config.shown(s), s);
+        settingRow(rows, "Foto nueva ahora", "›", null).setOnClickListener(v -> {
+            closeSheet();
+            refreshWallpaper(true);
+        });
+        first.setOnClickListener(v -> {
+            closeSheet();
+            openInPlace(new Intent(Settings.ACTION_SETTINGS));
+        });
+        TextView version = text(22, "sans-serif", 0x80FFFFFF);
+        try {
+            version.setText("Versión " + getPackageManager().getPackageInfo(getPackageName(), 0).versionName);
+        } catch (PackageManager.NameNotFoundException ignored) {
+            // Always found: it is this app.
+        }
+        version.setPadding(px(24), px(18), 0, 0);
+        rows.addView(version);
+
+        sheet.addView(panel, new FrameLayout.LayoutParams(px(980), -2, Gravity.CENTER));
+        root.addView(sheet, match());
+        first.requestFocus();
+    }
+
+    /** One row: the name on the left, the value on the right. OK on a setting moves it on. */
+    private View settingRow(LinearLayout rows, String label, String value, Config.Setting setting) {
+        GlassView g = new GlassView(this, u, px(30));
+        g.setFocusable(true);
+        g.setClickable(true);
+        LinearLayout in = new LinearLayout(this);
+        in.setGravity(Gravity.CENTER_VERTICAL);
+        in.setPadding(px(30), 0, px(30), 0);
+        g.addView(in, new FrameLayout.LayoutParams(-1, -1));
+        TextView name = text(28, "sans-serif-medium", 0xFFFFFFFF);
+        name.setText(label);
+        in.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView shown = text(26, "sans-serif", 0xB3FFFFFF);
+        shown.setText(value);
+        in.addView(shown);
+        if (setting != null) {
+            g.setOnClickListener(v -> {
+                config.next(setting);
+                shown.setText(config.shown(setting));
+                applySetting(setting);
+            });
+        }
+        g.setOnFocusChangeListener((v, focused) -> {
+            g.setLit(focused);
+            g.animate().scaleX(focused ? 1.03f : 1f).scaleY(focused ? 1.03f : 1f).setDuration(140).start();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, px(82));
+        lp.topMargin = px(12);
+        rows.addView(g, lp);
+        return g;
+    }
+
+    /** Puts a changed setting to work right away. */
+    private void applySetting(Config.Setting s) {
+        if (s == Config.WALLPAPER) {
+            if (photos()) {
+                Wallpapers.Photo photo = wallpapers.cached();
+                if (photo != null) {
+                    swapBackdrop(new Backdrop(photo.bitmap, screenW(), screenH()));
+                    photo.bitmap.recycle();
+                    credit.setText(photo.credit);
+                }
+                refreshWallpaper();
+            } else {
+                swapBackdrop(new Backdrop());
+            }
+            credit.setVisibility(photos() && config.on(Config.CREDIT) ? View.VISIBLE : View.GONE);
+        } else if (s == Config.PERIOD) {
+            refreshWallpaper();
+        } else if (s == Config.CREDIT) {
+            credit.setVisibility(photos() && config.on(Config.CREDIT) ? View.VISIBLE : View.GONE);
+        } else if (s == Config.FOOTBALL || s == Config.TEAM) {
+            Matches.favoriteTeam = Config.TEAM_NAMES[config.get(Config.TEAM)];
+            main.removeCallbacks(pollMatches);
+            refreshMatches();
+        } else if (s == Config.WEATHER || s == Config.CITY) {
+            weatherAt = 0;
+            refreshWeather();
+        } else if (s == Config.MUSIC) {
+            nowPlaying.stop();
+            if (config.on(Config.MUSIC)) nowPlaying.start();
+            else nowPlaying.setVisibility(View.GONE);
+        } else if (s == Config.LINGER) {
+            nowPlaying.lingerMs = Config.LINGER_MINUTES[config.get(Config.LINGER)] * 60_000L;
+        } else if (s == Config.CLOCK) {
+            updateClock();
+        }
     }
 
     /** The match in full: the score, and who scored and who was sent off, minute by minute. */
@@ -922,6 +1080,7 @@ public class MainActivity extends Activity {
         t.addView(crest, new LinearLayout.LayoutParams(px(110), px(110)));
         TextView name = text(32, "sans-serif-medium", 0xFFFFFFFF);
         name.setText(side.name);
+        name.setGravity(Gravity.CENTER);
         name.setPadding(0, px(14), 0, 0);
         t.addView(name);
         return t;

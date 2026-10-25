@@ -216,7 +216,7 @@ final class NowPlaying extends GlassView {
     }
 
     /** How long the last song stays on the card after its app stops reporting it. */
-    private static final long LINGER_MS = 60L * 60 * 1000;
+    long lingerMs = 60L * 60 * 1000;
     private String lastPkg, lastName, lastBy;
     private long lastSeen;
 
@@ -225,7 +225,7 @@ final class NowPlaying extends GlassView {
         if (pkg == null || name.isEmpty() || !(nowPlaying || state == PlaybackState.STATE_PAUSED)) {
             // Spotify drops its session a while after the music stops, and the stick closes
             // apps to save memory. The last song stays, paused, for an hour all the same.
-            if (lastPkg != null && System.currentTimeMillis() - lastSeen < LINGER_MS) {
+            if (lastPkg != null && System.currentTimeMillis() - lastSeen < lingerMs) {
                 setDancing(false);
                 setVisibility(VISIBLE);
             } else {

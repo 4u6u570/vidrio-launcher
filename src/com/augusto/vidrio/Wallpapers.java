@@ -61,11 +61,12 @@ final class Wallpapers {
     }
 
     /** The photo for these twenty minutes, downloading a new one when they change; null if nothing changed. */
-    Photo today(boolean force) throws Exception {
-        // One photo every twenty minutes: the key changes three times an hour.
+    Photo today(boolean force, int periodMinutes) throws Exception {
+        // The key changes once per period: every twenty minutes, every hour or every day.
         java.util.Calendar now = java.util.Calendar.getInstance();
-        String day = new SimpleDateFormat("yyyyMMddHH", Locale.US).format(now.getTime())
-                + now.get(java.util.Calendar.MINUTE) / 20;
+        int minuteOfDay = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE);
+        String day = new SimpleDateFormat("yyyyMMdd", Locale.US).format(now.getTime())
+                + "-" + minuteOfDay / periodMinutes;
         if (!force && day.equals(prefs.getString("dia", "")) && image.exists()) return null;
 
         List<String> titles = candidates();
