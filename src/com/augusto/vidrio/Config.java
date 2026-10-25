@@ -19,7 +19,8 @@ final class Config {
         }
     }
 
-    static final Setting WALLPAPER = new Setting("fondo", "Fondo", "Fotos de Salta", "Degradado");
+    /** Same order as the themes in Wallpapers; the last one is the painted gradient. */
+    static final Setting WALLPAPER = new Setting("tema", "Tema del fondo", "Astronomía", "Salta", "Degradado");
     static final Setting PERIOD = new Setting("periodo", "Cambiar la foto", "Cada 20 minutos", "Cada hora", "Cada día");
     static final int[] PERIOD_MINUTES = {20, 60, 24 * 60};
     static final Setting CREDIT = new Setting("credito", "Crédito de la foto", "Visible", "Oculto");

@@ -20,12 +20,18 @@ import java.util.Locale;
 import java.util.Random;
 
 /**
- * A photo of Salta every twenty minutes, from Wikimedia Commons: free, no key, and every photo there
- * carries a license that allows this. Only "quality images" are used, which are sharp and
- * large. The list of candidates is fetched once a week and a photo every twenty minutes, so the
- * launcher downloads three small pictures an hour, only while it is on screen. All of it runs off the main thread.
+ * A new wallpaper every so often, from Wikimedia Commons: free, no key, and every photo there
+ * carries a license that allows this. Two themes: astronomy, from Commons' featured pictures of
+ * galaxies, auroras, the Milky Way, the Moon and the Solar System; and Salta, from its quality
+ * images. Both are sharp and large. The list of candidates is fetched once a week and a photo
+ * once per period, only while the launcher is on screen. All of it runs off the main thread.
  */
 final class Wallpapers {
+    static final int ASTRONOMY = 0, SALTA = 1;
+    /** Featured pictures of the sky; their subcategories hold the best of Commons' astronomy. */
+    private static final String[] SKY = {
+            "Featured_pictures_of_galaxies", "Featured_pictures_of_aurora", "Featured_pictures_of_the_Milky_Way",
+            "Featured_pictures_of_the_Moon", "Featured_pictures_of_Solar_System", "Featured_pictures_of_the_Sun"};
     /** Places in Salta that have quality photos on Commons. */
     private static final String[] PLACES = {
             "Salta", "Cafayate", "Cachi", "\"Quebrada de las Conchas\"", "\"Los Cardones\"",
@@ -44,32 +50,34 @@ final class Wallpapers {
         }
     }
 
-    private final File image, list;
+    private final File image, dir;
     private final SharedPreferences prefs;
 
     Wallpapers(Context context) {
         image = new File(context.getFilesDir(), "fondo.jpg");
-        list = new File(context.getFilesDir(), "fondos.txt");
+        dir = context.getFilesDir();
+        new File(dir, "fondos.txt").delete(); // The list from before there were themes.
         prefs = context.getSharedPreferences("fondos", Context.MODE_PRIVATE);
     }
 
-    /** The photo already on disk, if any. Quick enough for startup. */
-    Photo cached() {
-        if (!image.exists()) return null;
+    /** The photo already on disk, if it belongs to this theme. Quick enough for startup. */
+    Photo cached(int theme) {
+        if (!image.exists() || prefs.getInt("tema", -1) != theme) return null;
         Bitmap b = BitmapFactory.decodeFile(image.getPath());
         return b == null ? null : new Photo(b, prefs.getString("credito", ""));
     }
 
     /** The photo for these twenty minutes, downloading a new one when they change; null if nothing changed. */
-    Photo today(boolean force, int periodMinutes) throws Exception {
+    Photo today(boolean force, int periodMinutes, int theme) throws Exception {
         // The key changes once per period: every twenty minutes, every hour or every day.
         java.util.Calendar now = java.util.Calendar.getInstance();
         int minuteOfDay = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE);
         String day = new SimpleDateFormat("yyyyMMdd", Locale.US).format(now.getTime())
                 + "-" + minuteOfDay / periodMinutes;
-        if (!force && day.equals(prefs.getString("dia", "")) && image.exists()) return null;
+        boolean sameTheme = prefs.getInt("tema", -1) == theme;
+        if (!force && sameTheme && day.equals(prefs.getString("dia", "")) && image.exists()) return null;
 
-        List<String> titles = candidates();
+        List<String> titles = candidates(theme);
         if (titles.isEmpty()) return null;
         String current = prefs.getString("titulo", "");
         String title;
@@ -88,16 +96,19 @@ final class Wallpapers {
         }
 
         JSONObject meta = info.optJSONObject("extmetadata");
-        String artist = plain(field(meta, "Artist"));
+        String artist = plain(field(meta, "Artist"), 40);
         String license = field(meta, "LicenseShortName");
-        String credit = placeOf(title) + (artist.isEmpty() ? "" : " · Foto: " + artist)
+        String name = plain(field(meta, "ObjectName"), 60);
+        String credit = (name.isEmpty() ? placeOf(title) : name) + (artist.isEmpty() ? "" : " · Foto: " + artist)
                 + (license.isEmpty() ? "" : ", " + license);
-        prefs.edit().putString("dia", day).putString("titulo", title).putString("credito", credit).apply();
+        prefs.edit().putString("dia", day).putInt("tema", theme).putString("titulo", title)
+                .putString("credito", credit).apply();
         return new Photo(b, credit);
     }
 
-    /** Wide quality photos of the places above, refreshed once a week. */
-    private List<String> candidates() throws Exception {
+    /** Wide photos of the theme, refreshed once a week. */
+    private List<String> candidates(int theme) throws Exception {
+        File list = new File(dir, "fondos-" + theme + ".txt");
         List<String> titles = new ArrayList<>();
         if (list.exists() && System.currentTimeMillis() - list.lastModified() < WEEK) {
             try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.FileReader(list))) {
@@ -105,14 +116,17 @@ final class Wallpapers {
             }
             if (!titles.isEmpty()) return titles;
         }
-        for (String place : PLACES) {
-            JSONObject r = new JSONObject(Net.text(API
-                    + "&generator=search&gsrnamespace=6&gsrlimit=100&prop=imageinfo&iiprop=size"
-                    + "&gsrsearch=" + Uri.encode("intitle:" + place + " incategory:Quality_images")));
+        String[] queries = theme == SALTA ? PLACES : SKY;
+        for (String q : queries) {
+            JSONObject r = new JSONObject(Net.text(API + "&prop=imageinfo&iiprop=size" + (theme == SALTA
+                    ? "&generator=search&gsrnamespace=6&gsrlimit=100&gsrsearch="
+                            + Uri.encode("intitle:" + q + " incategory:Quality_images")
+                    : "&generator=categorymembers&gcmtype=file&gcmlimit=500&gcmtitle=" + Uri.encode("Category:" + q))));
             JSONObject pages = r.optJSONObject("query") == null ? null : r.getJSONObject("query").optJSONObject("pages");
             if (pages == null) continue;
             for (Iterator<String> it = pages.keys(); it.hasNext(); ) {
                 JSONObject p = pages.getJSONObject(it.next());
+                if (p.optJSONArray("imageinfo") == null) continue;
                 JSONObject size = p.getJSONArray("imageinfo").getJSONObject(0);
                 int w = size.getInt("width"), h = size.getInt("height");
                 if (w >= 1920 && w > h * 1.3) titles.add(p.getString("title"));
@@ -136,10 +150,10 @@ final class Wallpapers {
         return f == null ? "" : f.optString("value", "");
     }
 
-    /** Commons sends the author as HTML, often a link. */
-    private static String plain(String html) {
+    /** Commons sends names as HTML, often a link. */
+    private static String plain(String html, int max) {
         String s = Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY).toString().trim();
-        return s.length() > 40 ? s.substring(0, 39) + "…" : s;
+        return s.length() > max ? s.substring(0, max - 1) + "…" : s;
     }
 
     /** "File:Quebrada de las Conchas 03.jpg" → "Quebrada de las Conchas" */

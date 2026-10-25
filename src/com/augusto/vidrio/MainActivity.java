@@ -125,7 +125,7 @@ public class MainActivity extends Activity {
         config = new Config(this);
         Matches.favoriteTeam = Config.TEAM_NAMES[config.get(Config.TEAM)];
         wallpapers = new Wallpapers(this);
-        Wallpapers.Photo photo = GlassView.backdrop == null && photos() ? wallpapers.cached() : null;
+        Wallpapers.Photo photo = GlassView.backdrop == null && photos() ? wallpapers.cached(theme()) : null;
         if (photo != null) {
             GlassView.backdrop = new Backdrop(photo.bitmap, screenW(), screenH());
             photo.bitmap.recycle();
@@ -153,9 +153,11 @@ public class MainActivity extends Activity {
 
         credit = text(20, "sans-serif", 0xA6FFFFFF);
         credit.setGravity(Gravity.END);
+        credit.setSingleLine();
+        credit.setEllipsize(android.text.TextUtils.TruncateAt.END);
         credit.setText(prefsCredit());
         credit.setVisibility(photos() && config.on(Config.CREDIT) ? View.VISIBLE : View.GONE);
-        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(px(760), -2, Gravity.TOP | Gravity.END);
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(px(1000), -2, Gravity.TOP | Gravity.END);
         cp.rightMargin = px(SIDE);
         cp.topMargin = px(178);
         home.addView(credit, cp);
@@ -367,7 +369,12 @@ public class MainActivity extends Activity {
     }
 
     private boolean photos() {
-        return config.get(Config.WALLPAPER) == 0;
+        return config.get(Config.WALLPAPER) != Config.WALLPAPER.choices.length - 1;
+    }
+
+    /** The photo theme chosen, in Wallpapers' numbering. */
+    private int theme() {
+        return config.get(Config.WALLPAPER);
     }
 
     /** A new photo of Salta when its period runs out; the glass follows the wallpaper. */
@@ -378,10 +385,11 @@ public class MainActivity extends Activity {
     private void refreshWallpaper(boolean force) {
         if (!photos()) return;
         int period = Config.PERIOD_MINUTES[config.get(Config.PERIOD)];
+        int theme = theme();
         worker.execute(() -> {
             Wallpapers.Photo photo;
             try {
-                photo = force ? wallpapers.today(true, period) : wallpapers.today(false, period);
+                photo = wallpapers.today(force, period, theme);
             } catch (Exception e) {
                 return;
             }
@@ -389,7 +397,7 @@ public class MainActivity extends Activity {
             Backdrop backdrop = new Backdrop(photo.bitmap, screenW(), screenH());
             photo.bitmap.recycle();
             main.post(() -> {
-                if (isDestroyed() || !photos()) return;
+                if (isDestroyed() || !photos() || theme() != theme) return;
                 swapBackdrop(backdrop);
                 credit.setText(photo.credit);
             });
@@ -956,7 +964,7 @@ public class MainActivity extends Activity {
     private void applySetting(Config.Setting s) {
         if (s == Config.WALLPAPER) {
             if (photos()) {
-                Wallpapers.Photo photo = wallpapers.cached();
+                Wallpapers.Photo photo = wallpapers.cached(theme());
                 if (photo != null) {
                     swapBackdrop(new Backdrop(photo.bitmap, screenW(), screenH()));
                     photo.bitmap.recycle();
