@@ -162,7 +162,7 @@ public class MainActivity extends Activity {
 
         // The middle of the screen is for widgets: what is playing goes on the left.
         nowPlaying = new NowPlaying(this, u);
-        FrameLayout.LayoutParams np = new FrameLayout.LayoutParams(px(820), -2, Gravity.TOP | Gravity.START);
+        FrameLayout.LayoutParams np = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
         np.leftMargin = px(SIDE);
         np.topMargin = px(250);
         home.addView(nowPlaying, np);
@@ -465,6 +465,8 @@ public class MainActivity extends Activity {
         LinearLayout in = new LinearLayout(this);
         in.setGravity(Gravity.CENTER_VERTICAL);
         in.setPadding(px(26), 0, px(28), 0);
+        // The dot grows past its own box while it pulses.
+        in.setClipChildren(false);
         live.addView(in, new FrameLayout.LayoutParams(-2, -1));
 
         liveDot = new View(this);
@@ -475,10 +477,11 @@ public class MainActivity extends Activity {
         in.addView(liveDot, new LinearLayout.LayoutParams(px(16), px(16)));
         // Animates only the dot's scale and alpha, which the GPU does without repainting the pill.
         pulse = ObjectAnimator.ofPropertyValuesHolder(liveDot,
-                PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.5f),
-                PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.5f),
+                PropertyValuesHolder.ofFloat(View.SCALE_X, 0.85f, 1.3f),
+                PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.85f, 1.3f),
                 PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.35f));
-        pulse.setDuration(750);
+        pulse.setDuration(1300);
+        pulse.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
         pulse.setRepeatCount(ObjectAnimator.INFINITE);
         pulse.setRepeatMode(ObjectAnimator.REVERSE);
 
