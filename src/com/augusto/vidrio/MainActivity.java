@@ -1,5 +1,7 @@
 package com.augusto.vidrio;
 
+import android.animation.ObjectAnimator;
+import android.animation.PropertyValuesHolder;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
@@ -38,6 +40,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -154,15 +157,15 @@ public class MainActivity extends Activity {
         credit.setText(prefsCredit());
         FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(px(760), -2, Gravity.TOP | Gravity.END);
         cp.rightMargin = px(SIDE);
-        cp.topMargin = px(56 + 72 + 18);
+        cp.topMargin = px(178);
         home.addView(credit, cp);
 
-        // The middle of the screen is for widgets; football goes on the left.
-        matchesView = new MatchesView(this, u);
-        FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(px(860), -2, Gravity.TOP | Gravity.START);
-        mp.leftMargin = px(SIDE);
-        mp.topMargin = px(250);
-        home.addView(matchesView, mp);
+        // The middle of the screen is for widgets: what is playing goes on the left.
+        nowPlaying = new NowPlaying(this, u);
+        FrameLayout.LayoutParams np = new FrameLayout.LayoutParams(px(820), -2, Gravity.TOP | Gravity.START);
+        np.leftMargin = px(SIDE);
+        np.topMargin = px(250);
+        home.addView(nowPlaying, np);
 
         // The row slides on its own instead of scrolling, so the focused card always keeps the
         // side margin: a scroll view stops with the last card flush against the screen edge.
@@ -200,6 +203,8 @@ public class MainActivity extends Activity {
         updateClock();
         updateNetwork();
         refreshWallpaper();
+        refreshWeather();
+        nowPlaying.start();
         main.removeCallbacks(pollMatches);
         refreshMatches();
     }
@@ -208,6 +213,9 @@ public class MainActivity extends Activity {
     @Override protected void onPause() {
         visible = false;
         main.removeCallbacks(pollMatches);
+        main.removeCallbacks(rotateLive);
+        pulse.pause();
+        nowPlaying.stop();
         super.onPause();
     }
 
@@ -228,8 +236,22 @@ public class MainActivity extends Activity {
     private Wallpapers wallpapers;
     private View wallpaperView;
     private TextView credit;
-    private MatchesView matchesView;
+    private NowPlaying nowPlaying;
     private boolean visible, fetchingMatches;
+    private long weatherAt;
+    /** The live-match pill in the top bar: only there while something is being played. */
+    private GlassView live;
+    private View liveDot;
+    private ImageView liveHome, liveAway;
+    private TextView liveClock, liveScore, weather;
+    private ObjectAnimator pulse;
+    private List<Matches.Match> liveMatches = new ArrayList<>();
+    private int liveIndex;
+    /** With more than one match being played, the pill takes turns. */
+    private final Runnable rotateLive = () -> {
+        liveIndex++;
+        showLive();
+    };
 
     /**
      * Asks again in a minute while something is being played; otherwise at the next kickoff,
@@ -255,7 +277,9 @@ public class MainActivity extends Activity {
             main.post(() -> {
                 fetchingMatches = false;
                 if (isDestroyed()) return;
-                matchesView.show(board, logos);
+                liveMatches = new ArrayList<>();
+                for (Matches.Match m : board.matches) if (m.live) liveMatches.add(m);
+                showLive();
                 long minute = 60_000, quarter = 15 * minute;
                 long delay = board.anyLive() ? minute : quarter;
                 if (!board.anyLive() && board.nextStart > 0) {
@@ -263,6 +287,42 @@ public class MainActivity extends Activity {
                 }
                 main.removeCallbacks(pollMatches);
                 if (visible) main.postDelayed(pollMatches, delay);
+            });
+        });
+    }
+
+    private void showLive() {
+        main.removeCallbacks(rotateLive);
+        if (liveMatches.isEmpty()) {
+            live.setVisibility(View.GONE);
+            pulse.pause();
+            return;
+        }
+        Matches.Match m = liveMatches.get(liveIndex % liveMatches.size());
+        liveClock.setText(m.status);
+        liveScore.setText(m.home.abbr + "  " + m.home.goals + " – " + m.away.goals + "  " + m.away.abbr);
+        liveHome.setImageBitmap(m.home.logo == null ? null : logos.get(m.home.logo));
+        liveAway.setImageBitmap(m.away.logo == null ? null : logos.get(m.away.logo));
+        live.setVisibility(View.VISIBLE);
+        if (pulse.isPaused()) pulse.resume();
+        else if (!pulse.isStarted()) pulse.start();
+        if (liveMatches.size() > 1 && visible) main.postDelayed(rotateLive, 8_000);
+    }
+
+    /** Every half hour at most, and only while the launcher is on screen. */
+    private void refreshWeather() {
+        if (System.currentTimeMillis() - weatherAt < 30 * 60_000) return;
+        worker.execute(() -> {
+            Weather w;
+            try {
+                w = Weather.fetch();
+            } catch (Exception e) {
+                return;
+            }
+            main.post(() -> {
+                weatherAt = System.currentTimeMillis();
+                weather.setText(w.icon + "  " + w.now + "°   " + w.max + "° / " + w.min + "°");
+                ((View) weather.getParent()).setVisibility(View.VISIBLE);
             });
         });
     }
@@ -371,17 +431,74 @@ public class MainActivity extends Activity {
         clock.addView(date);
         row.addView(clock, new LinearLayout.LayoutParams(0, -2, 1));
 
+        row.addView(livePill(), barItem());
+        weather = text(26, "sans-serif-medium", 0xF2FFFFFF);
+        weather.setPadding(px(28), 0, px(28), 0);
+        weather.setGravity(Gravity.CENTER);
+        GlassView weatherPill = new GlassView(this, u, px(36));
+        weatherPill.addView(weather, new FrameLayout.LayoutParams(-2, -1, Gravity.CENTER));
+        weatherPill.setVisibility(View.GONE);
+        row.addView(weatherPill, barItem());
+
         network = text(26, "sans-serif-medium", 0xF2FFFFFF);
         network.setPadding(px(30), 0, px(30), 0);
         network.setGravity(Gravity.CENTER);
-        row.addView(button(network, () -> openInPlace(new Intent(Settings.ACTION_WIFI_SETTINGS))),
-                new LinearLayout.LayoutParams(-2, px(72)));
+        row.addView(button(network, () -> openInPlace(new Intent(Settings.ACTION_WIFI_SETTINGS))), barItem());
 
         View settings = pill("Ajustes", () -> openInPlace(new Intent(Settings.ACTION_SETTINGS)));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, px(72));
         lp.leftMargin = px(20);
         row.addView(settings, lp);
         return row;
+    }
+
+    private LinearLayout.LayoutParams barItem() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, px(72));
+        lp.leftMargin = px(20);
+        return lp;
+    }
+
+    /** A pulsing red dot, the minute, the two crests and the score. */
+    private View livePill() {
+        live = new GlassView(this, u, px(36));
+        live.setVisibility(View.GONE);
+        LinearLayout in = new LinearLayout(this);
+        in.setGravity(Gravity.CENTER_VERTICAL);
+        in.setPadding(px(26), 0, px(28), 0);
+        live.addView(in, new FrameLayout.LayoutParams(-2, -1));
+
+        liveDot = new View(this);
+        android.graphics.drawable.GradientDrawable red = new android.graphics.drawable.GradientDrawable();
+        red.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        red.setColor(0xFFFF453A);
+        liveDot.setBackground(red);
+        in.addView(liveDot, new LinearLayout.LayoutParams(px(16), px(16)));
+        // Animates only the dot's scale and alpha, which the GPU does without repainting the pill.
+        pulse = ObjectAnimator.ofPropertyValuesHolder(liveDot,
+                PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.5f),
+                PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.5f),
+                PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.35f));
+        pulse.setDuration(750);
+        pulse.setRepeatCount(ObjectAnimator.INFINITE);
+        pulse.setRepeatMode(ObjectAnimator.REVERSE);
+
+        liveClock = text(24, "sans-serif-medium", 0xFFFF6961);
+        liveClock.setPadding(px(14), 0, px(16), 0);
+        in.addView(liveClock);
+        liveHome = crest();
+        in.addView(liveHome, new LinearLayout.LayoutParams(px(36), px(36)));
+        liveScore = text(26, "sans-serif-medium", 0xFFFFFFFF);
+        liveScore.setPadding(px(12), 0, px(12), 0);
+        in.addView(liveScore);
+        liveAway = crest();
+        in.addView(liveAway, new LinearLayout.LayoutParams(px(36), px(36)));
+        return live;
+    }
+
+    private ImageView crest() {
+        ImageView i = new ImageView(this);
+        i.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        return i;
     }
 
     private void updateClock() {
@@ -682,7 +799,7 @@ public class MainActivity extends Activity {
         GlassView g = new GlassView(this, u, px(36));
         g.setFocusable(true);
         g.setClickable(true);
-        g.addView(content, new FrameLayout.LayoutParams(-1, -1));
+        g.addView(content, new FrameLayout.LayoutParams(-2, -1, Gravity.CENTER));
         g.setOnClickListener(v -> action.run());
         g.setOnFocusChangeListener((v, focused) -> {
             g.setLit(focused);

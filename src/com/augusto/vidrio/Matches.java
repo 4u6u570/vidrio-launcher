@@ -30,14 +30,16 @@ final class Matches {
     private static final String[] FAVORITE_TEAMS = {"Boca Juniors", "Inter Miami"};
     /** A finished match stays a while: who turns the TV on after the whistle wants the result. */
     private static final long FINISHED_VISIBLE_MS = 3L * 60 * 60 * 1000;
+    private static final long LATE_START_MS = 30L * 60 * 1000;
     static final int MAX = 5;
 
     static final class Side {
-        final String name, logo;
+        final String name, abbr, logo;
         final String goals;
 
-        Side(String name, String logo, String goals) {
+        Side(String name, String abbr, String logo, String goals) {
             this.name = name;
+            this.abbr = abbr;
             this.logo = logo;
             this.goals = goals;
         }
@@ -100,7 +102,10 @@ final class Matches {
                 Match m = read(events.optJSONObject(i), league[1]);
                 if (m == null || !seen.add(m.id)) continue;
                 if (league[0].equals("usa.1") && !m.favorite) continue;
-                if (!m.live && !m.finished && m.start > now && (next == 0 || m.start < next)) next = m.start;
+                // A kickoff that already passed without the match starting counts as now: late
+                // starts are common, and the widget should keep asking every minute.
+                long kickoff = m.start > now ? m.start : now - m.start < LATE_START_MS ? now : 0;
+                if (!m.live && !m.finished && kickoff > 0 && (next == 0 || kickoff < next)) next = kickoff;
                 boolean recent = m.finished && now - m.start < FINISHED_VISIBLE_MS;
                 if (m.live || (m.favorite && (recent || isToday(m.start)))) all.add(m);
             }
@@ -130,7 +135,8 @@ final class Matches {
                 JSONObject team = t.getJSONObject("team");
                 String full = team.optString("displayName");
                 for (String f : FAVORITE_TEAMS) if (full.contains(f)) favorite = true;
-                Side s = new Side(team.optString("shortDisplayName", full).trim(), small(team.optString("logo")),
+                String shortName = team.optString("shortDisplayName", full).trim();
+                Side s = new Side(shortName, team.optString("abbreviation", shortName), small(team.optString("logo")),
                         started ? t.optString("score", "") : "");
                 if ("home".equals(t.optString("homeAway"))) home = s;
                 else away = s;
@@ -141,7 +147,7 @@ final class Matches {
             boolean live = "in".equals(state);
             boolean finished = "post".equals(state);
             String label;
-            if (name.equals("STATUS_HALFTIME")) label = "Entretiempo";
+            if (name.equals("STATUS_HALFTIME")) label = "ET";
             else if (live) label = status.optString("displayClock", "En vivo");
             else if (finished) label = "Final";
             else label = new SimpleDateFormat("HH:mm", Locale.US).format(new Date(start));
