@@ -6,6 +6,8 @@ Launcher liviano para Android TV (Android 7 o más nuevo), con estilo de vidrio 
 - Abajo, una sola fila de **favoritos**. Empieza con **Todas las apps**, que abre la grilla con todo lo instalado. Cada app nueva se suma sola al final de la fila. Las apps de TV muestran su banner.
 - **OK** abre la app. **Mantener OK** (o la tecla Menú) abre el menú de la app: agregar o quitar de favoritos, reordenar, ver la información.
 - Configuración se abre encima del launcher, que queda visible detrás.
+- **Fondo del día:** una foto de Salta distinta cada día, de las "quality images" de Wikimedia Commons, con su crédito y licencia en pantalla.
+- **Fútbol:** lo que se juega en vivo en las ligas principales, más los partidos del día de Boca e Inter Miami. Lee el tablero público de ESPN. Consulta cada minuto mientras hay partidos en vivo y cada 15 minutos si no. Mientras hay una app abierta, no consulta nada.
 
 ## Compilar
 

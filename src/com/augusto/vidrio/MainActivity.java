@@ -11,6 +11,8 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
@@ -22,6 +24,8 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.SpannableString;
 import android.text.Spanned;
@@ -47,6 +51,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Home: the clock on top, an empty middle kept free for widgets, and one row of favorites along
@@ -115,10 +122,16 @@ public class MainActivity extends Activity {
         tileW = (px(1920 - 2 * SIDE) - (COLUMNS - 1) * px(GAP)) / COLUMNS;
         tileH = tileW * 9 / 16;
         prefs = getSharedPreferences("vidrio", MODE_PRIVATE);
+        wallpapers = new Wallpapers(this);
+        Wallpapers.Photo photo = GlassView.backdrop == null ? wallpapers.cached() : null;
+        if (photo != null) {
+            GlassView.backdrop = new Backdrop(photo.bitmap, screenW(), screenH());
+            photo.bitmap.recycle();
+        }
         if (GlassView.backdrop == null) GlassView.backdrop = new Backdrop();
 
         root = new FrameLayout(this);
-        root.addView(new View(this) {
+        root.addView(wallpaperView = new View(this) {
             final Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
             final Rect dst = new Rect();
             @Override protected void onDraw(Canvas c) {
@@ -135,6 +148,21 @@ public class MainActivity extends Activity {
         hp.leftMargin = hp.rightMargin = px(SIDE);
         hp.topMargin = px(56);
         home.addView(header(), hp);
+
+        credit = text(20, "sans-serif", 0xA6FFFFFF);
+        credit.setGravity(Gravity.END);
+        credit.setText(prefsCredit());
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(px(760), -2, Gravity.TOP | Gravity.END);
+        cp.rightMargin = px(SIDE);
+        cp.topMargin = px(56 + 72 + 18);
+        home.addView(credit, cp);
+
+        // The middle of the screen is for widgets; football goes on the left.
+        matchesView = new MatchesView(this, u);
+        FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(px(860), -2, Gravity.TOP | Gravity.START);
+        mp.leftMargin = px(SIDE);
+        mp.topMargin = px(250);
+        home.addView(matchesView, mp);
 
         // The row slides on its own instead of scrolling, so the focused card always keeps the
         // side margin: a scroll view stops with the last card flush against the screen edge.
@@ -168,15 +196,109 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        visible = true;
         updateClock();
         updateNetwork();
+        refreshWallpaper();
+        main.removeCallbacks(pollMatches);
+        refreshMatches();
+    }
+
+    /** Nothing is fetched while an app is on screen: the widgets only work while seen. */
+    @Override protected void onPause() {
+        visible = false;
+        main.removeCallbacks(pollMatches);
+        super.onPause();
     }
 
     @Override protected void onDestroy() {
+        worker.shutdownNow();
         unregisterReceiver(packageReceiver);
         unregisterReceiver(clockReceiver);
         unregisterReceiver(networkReceiver);
         super.onDestroy();
+    }
+
+    // ---- Widgets ----
+
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final Map<String, Bitmap> logos = new ConcurrentHashMap<>();
+    private final Runnable pollMatches = this::refreshMatches;
+    private Wallpapers wallpapers;
+    private View wallpaperView;
+    private TextView credit;
+    private MatchesView matchesView;
+    private boolean visible, fetchingMatches;
+
+    /**
+     * Asks again in a minute while something is being played; otherwise at the next kickoff,
+     * and never later than in fifteen minutes.
+     */
+    private void refreshMatches() {
+        if (fetchingMatches) return;
+        fetchingMatches = true;
+        worker.execute(() -> {
+            Matches.Board board = Matches.fetch();
+            for (Matches.Match m : board.matches) {
+                for (String url : new String[]{m.home.logo, m.away.logo}) {
+                    if (url == null || logos.containsKey(url)) continue;
+                    try {
+                        byte[] png = Net.get(url);
+                        Bitmap b = BitmapFactory.decodeByteArray(png, 0, png.length);
+                        if (b != null) logos.put(url, b);
+                    } catch (Exception ignored) {
+                        // A team without its crest still shows its name.
+                    }
+                }
+            }
+            main.post(() -> {
+                fetchingMatches = false;
+                if (isDestroyed()) return;
+                matchesView.show(board, logos);
+                long minute = 60_000, quarter = 15 * minute;
+                long delay = board.anyLive() ? minute : quarter;
+                if (!board.anyLive() && board.nextStart > 0) {
+                    delay = Math.max(minute, Math.min(quarter, board.nextStart - System.currentTimeMillis()));
+                }
+                main.removeCallbacks(pollMatches);
+                if (visible) main.postDelayed(pollMatches, delay);
+            });
+        });
+    }
+
+    /** A new photo of Salta once a day; the glass follows the wallpaper. */
+    private void refreshWallpaper() {
+        worker.execute(() -> {
+            Wallpapers.Photo photo;
+            try {
+                photo = wallpapers.today(false);
+            } catch (Exception e) {
+                return;
+            }
+            if (photo == null) return;
+            Backdrop backdrop = new Backdrop(photo.bitmap, screenW(), screenH());
+            photo.bitmap.recycle();
+            main.post(() -> {
+                if (isDestroyed()) return;
+                GlassView.backdrop = backdrop;
+                credit.setText(photo.credit);
+                wallpaperView.invalidate();
+                GlassView.refresh(root);
+            });
+        });
+    }
+
+    private String prefsCredit() {
+        return getSharedPreferences("fondos", MODE_PRIVATE).getString("credito", "");
+    }
+
+    private int screenW() {
+        return getResources().getDisplayMetrics().widthPixels;
+    }
+
+    private int screenH() {
+        return getResources().getDisplayMetrics().heightPixels;
     }
 
     /** Pressing Home while already home goes back to the start of the row. */
@@ -241,10 +363,10 @@ public class MainActivity extends Activity {
 
         LinearLayout clock = new LinearLayout(this);
         clock.setOrientation(LinearLayout.VERTICAL);
-        time = text(118, "sans-serif-thin", 0xFFFFFFFF);
+        time = text(76, "sans-serif-light", 0xFFFFFFFF);
         time.setLetterSpacing(-0.02f);
         time.setIncludeFontPadding(false);
-        date = text(32, "sans-serif-light", 0xD9FFFFFF);
+        date = text(26, "sans-serif-light", 0xD9FFFFFF);
         clock.addView(time);
         clock.addView(date);
         row.addView(clock, new LinearLayout.LayoutParams(0, -2, 1));

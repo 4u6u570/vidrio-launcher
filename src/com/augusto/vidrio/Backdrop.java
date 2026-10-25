@@ -35,22 +35,49 @@ final class Backdrop {
                 new float[]{0f, 0.35f, 0.6f, 1f}, Shader.TileMode.CLAMP));
         c.drawRect(0, 0, W, H, shade);
         blur(wallpaper, 8);
+        frosted = frost(wallpaper, 1.08f, 14);
+    }
 
-        Bitmap small = Bitmap.createScaledBitmap(wallpaper, W / 2, H / 2, true);
+    /**
+     * A photo for wallpaper: cropped to fill the screen, darkened at the top and the bottom so
+     * the clock and the cards stay readable, and frosted for the glass.
+     */
+    Backdrop(Bitmap photo, int screenW, int screenH) {
+        wallpaper = Bitmap.createBitmap(screenW, screenH, Bitmap.Config.RGB_565);
+        Canvas c = new Canvas(wallpaper);
+        float scale = Math.max(screenW / (float) photo.getWidth(), screenH / (float) photo.getHeight());
+        float w = photo.getWidth() * scale, h = photo.getHeight() * scale;
+        c.drawBitmap(photo, null, new android.graphics.RectF((screenW - w) / 2, (screenH - h) / 2,
+                (screenW + w) / 2, (screenH + h) / 2), new Paint(Paint.FILTER_BITMAP_FLAG));
+        Paint shade = new Paint();
+        shade.setShader(new LinearGradient(0, 0, 0, screenH,
+                new int[]{0x8C000000, 0x14000000, 0x14000000, 0x99000000},
+                new float[]{0f, 0.4f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, screenW, screenH, shade);
+        // Photos are bright: their glass darkens a little instead of lifting, or it washes out.
+        frosted = frost(wallpaper, 0.7f, 0);
+    }
+
+    /** Small, blurred and saturated; gain and lift set how much lighter the glass is. */
+    private static Bitmap frost(Bitmap source, float gain, int lift) {
+        Bitmap small = Bitmap.createBitmap(W / 2, H / 2, Bitmap.Config.ARGB_8888);
+        new Canvas(small).drawBitmap(source, null, new android.graphics.Rect(0, 0, W / 2, H / 2),
+                new Paint(Paint.FILTER_BITMAP_FLAG));
         blur(small, 6);
         // Glass lifts and saturates what is behind it a little, like the real thing.
         ColorMatrix cm = new ColorMatrix();
         cm.setSaturation(1.45f);
         cm.postConcat(new ColorMatrix(new float[]{
-                1.08f, 0, 0, 0, 14,
-                0, 1.08f, 0, 0, 14,
-                0, 0, 1.08f, 0, 18,
+                gain, 0, 0, 0, lift,
+                0, gain, 0, 0, lift,
+                0, 0, gain, 0, lift + 4,
                 0, 0, 0, 1, 0}));
-        frosted = Bitmap.createBitmap(W / 2, H / 2, Bitmap.Config.ARGB_8888);
+        Bitmap frosted = Bitmap.createBitmap(W / 2, H / 2, Bitmap.Config.ARGB_8888);
         Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
         p.setColorFilter(new ColorMatrixColorFilter(cm));
         new Canvas(frosted).drawBitmap(small, 0, 0, p);
         small.recycle();
+        return frosted;
     }
 
     private static void blob(Canvas c, float x, float y, float r, int color) {

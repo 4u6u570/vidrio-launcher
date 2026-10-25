@@ -31,6 +31,7 @@ class GlassView extends FrameLayout {
     private final Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix matrix = new Matrix();
+    private android.graphics.Bitmap shaderOf;
     private final RectF box = new RectF(), rim = new RectF();
 
     GlassView(Context context, float u, float radius) {
@@ -39,7 +40,6 @@ class GlassView extends FrameLayout {
         this.radius = radius;
         setWillNotDraw(false);
         setClipChildren(false);
-        glass.setShader(new BitmapShader(backdrop.frosted, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
         edge.setStyle(Paint.Style.STROKE);
         setOutlineProvider(new ViewOutlineProvider() {
             @Override public void getOutline(View v, Outline o) {
@@ -90,6 +90,11 @@ class GlassView extends FrameLayout {
             View v = (View) p;
             x += v.getLeft() - v.getScrollX() + v.getTranslationX();
             y += v.getTop() - v.getScrollY() + v.getTranslationY();
+        }
+        // The wallpaper can change under a pane that already exists.
+        if (shaderOf != backdrop.frosted) {
+            shaderOf = backdrop.frosted;
+            glass.setShader(new BitmapShader(shaderOf, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
         }
         View root = getRootView();
         matrix.setScale(root.getWidth() / (float) backdrop.frosted.getWidth(),
