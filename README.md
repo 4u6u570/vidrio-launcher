@@ -6,10 +6,10 @@ Launcher liviano para Android TV (Android 7 o más nuevo), con estilo de vidrio 
 - Abajo, una sola fila de **favoritos**. Empieza con **Todas las apps**, que abre la grilla con todo lo instalado. Cada app nueva se suma sola al final de la fila. Las apps de TV muestran su banner.
 - **OK** abre la app. **Mantener OK** (o la tecla Menú) abre el menú de la app: agregar o quitar de favoritos, reordenar, ver la información.
 - Configuración se abre encima del launcher, que queda visible detrás.
-- **Fondo del día:** una foto de Salta distinta cada día, de las "quality images" de Wikimedia Commons, con su crédito y licencia en pantalla.
-- **Fútbol en vivo:** una pastilla en la barra de arriba, con punto rojo que late, minuto, escudos y resultado. Solo aparece mientras se juega algo. Prioriza Boca e Inter Miami y, si hay varios partidos, los alterna. Lee el tablero público de ESPN, cada minuto si hay partido y cada 15 minutos si no.
-- **Clima de Salta:** temperatura actual, máxima y mínima, de Open-Meteo, cada 30 minutos.
-- **Reproduciendo ahora:** un recuadro con la portada del disco, un ecualizador que se mueve mientras suena, el tema y el artista. La portada de Spotify sale del catálogo público de iTunes; en otras apps se muestra su ícono. Solo aparece si hay algo sonando o en pausa.
+- **Fondo:** una foto de Salta nueva cada 20 minutos, con fundido, de las "quality images" de Wikimedia Commons, con su crédito y licencia en pantalla.
+- **Fútbol en vivo:** una pastilla en la barra de arriba, con punto rojo que late, minuto, escudos y resultado. Solo aparece mientras se juega algo. Si juega Boca, se ve solo ese; si no, los de equipos argentinos (e Inter Miami), y si no hay, el resto, alternándolos. Con OK se abre el detalle: marcador, goles con su autor y minuto, y expulsiones. Lee el tablero público de ESPN, cada minuto si hay partido y cada 15 minutos si no.
+- **Clima de Salta:** temperatura actual, máxima y mínima, de Open-Meteo, cada 30 minutos. Con OK se abre el pronóstico de 7 días.
+- **Reproduciendo ahora:** un recuadro con la portada del disco, un ecualizador que se mueve mientras suena, el tema y el artista. La portada de Spotify sale del catálogo público de iTunes; en otras apps se muestra su ícono. Aparece si hay algo sonando o en pausa, y se queda una hora con el último tema. Con OK se abre la app.
 
 Los widgets solo consultan mientras el inicio está a la vista: con una app abierta, no gastan nada.
 

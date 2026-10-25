@@ -1,7 +1,7 @@
 package com.augusto.vidrio;
 
-import android.animation.ObjectAnimator;
-import android.animation.PropertyValuesHolder;
+import android.animation.LayoutTransition;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
@@ -85,10 +85,14 @@ public class MainActivity extends Activity {
     private FrameLayout sheet;
     private ViewGroup sheetBlocks;
     private String sheetPackage;
+    /** Where focus goes back to when a panel that isn't an app's menu closes. */
+    private View sheetReturn;
 
     private final BroadcastReceiver clockReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             updateClock();
+            // A new photo every twenty minutes.
+            if (visible && java.util.Calendar.getInstance().get(java.util.Calendar.MINUTE) % 20 == 0) refreshWallpaper();
         }
     };
     private final BroadcastReceiver networkReceiver = new BroadcastReceiver() {
@@ -239,12 +243,17 @@ public class MainActivity extends Activity {
     private NowPlaying nowPlaying;
     private boolean visible, fetchingMatches;
     private long weatherAt;
+    private Weather forecast;
     /** The live-match pill in the top bar: only there while something is being played. */
     private GlassView live;
-    private View liveDot;
+    private View liveContent;
+    private Matches.Match shownLive;
+    /** The open match panel, refreshed with every poll; null while closed. */
+    private LinearLayout matchBody;
+    private String matchId;
     private ImageView liveHome, liveAway;
     private TextView liveClock, liveScore, weather;
-    private ObjectAnimator pulse;
+    private ValueAnimator pulse;
     private List<Matches.Match> liveMatches = new ArrayList<>();
     private int liveIndex;
     /** With more than one match being played, the pill takes turns. */
@@ -277,9 +286,16 @@ public class MainActivity extends Activity {
             main.post(() -> {
                 fetchingMatches = false;
                 if (isDestroyed()) return;
+                // Only the most important tier is shown: Boca alone when it plays; otherwise the
+                // Argentine teams; otherwise everything else.
+                int best = 3;
+                for (Matches.Match m : board.matches) if (m.live) best = Math.min(best, m.priority);
                 liveMatches = new ArrayList<>();
-                for (Matches.Match m : board.matches) if (m.live) liveMatches.add(m);
+                for (Matches.Match m : board.matches) if (m.live && m.priority == best) liveMatches.add(m);
                 showLive();
+                if (matchBody != null) {
+                    for (Matches.Match m : board.matches) if (m.id.equals(matchId)) fillMatch(m);
+                }
                 long minute = 60_000, quarter = 15 * minute;
                 long delay = board.anyLive() ? minute : quarter;
                 if (!board.anyLive() && board.nextStart > 0) {
@@ -299,14 +315,28 @@ public class MainActivity extends Activity {
             return;
         }
         Matches.Match m = liveMatches.get(liveIndex % liveMatches.size());
-        liveClock.setText(m.status);
-        liveScore.setText(m.home.abbr + "  " + m.home.goals + " – " + m.away.goals + "  " + m.away.abbr);
-        liveHome.setImageBitmap(m.home.logo == null ? null : logos.get(m.home.logo));
-        liveAway.setImageBitmap(m.away.logo == null ? null : logos.get(m.away.logo));
+        if (live.getVisibility() == View.VISIBLE) {
+            // Changing matches: the old one fades out, the new one fades in.
+            liveContent.animate().alpha(0f).setDuration(220).withEndAction(() -> {
+                fillLive(m);
+                liveContent.animate().alpha(1f).setDuration(320).start();
+            }).start();
+        } else {
+            fillLive(m);
+            liveContent.setAlpha(1f);
+        }
         live.setVisibility(View.VISIBLE);
         if (pulse.isPaused()) pulse.resume();
         else if (!pulse.isStarted()) pulse.start();
         if (liveMatches.size() > 1 && visible) main.postDelayed(rotateLive, 8_000);
+    }
+
+    private void fillLive(Matches.Match m) {
+        shownLive = m;
+        liveClock.setText(m.status);
+        liveScore.setText(m.home.abbr + "  " + m.home.goals + " – " + m.away.goals + "  " + m.away.abbr);
+        liveHome.setImageBitmap(m.home.logo == null ? null : logos.get(m.home.logo));
+        liveAway.setImageBitmap(m.away.logo == null ? null : logos.get(m.away.logo));
     }
 
     /** Every half hour at most, and only while the launcher is on screen. */
@@ -321,13 +351,15 @@ public class MainActivity extends Activity {
             }
             main.post(() -> {
                 weatherAt = System.currentTimeMillis();
-                weather.setText(w.icon + "  " + w.now + "°   " + w.max + "° / " + w.min + "°");
+                forecast = w;
+                Weather.Day today = w.days[0];
+                weather.setText(w.icon + "  " + w.now + "°   " + today.max + "° / " + today.min + "°");
                 ((View) weather.getParent()).setVisibility(View.VISIBLE);
             });
         });
     }
 
-    /** A new photo of Salta once a day; the glass follows the wallpaper. */
+    /** A new photo of Salta every twenty minutes; the glass follows the wallpaper. */
     private void refreshWallpaper() {
         worker.execute(() -> {
             Wallpapers.Photo photo;
@@ -341,10 +373,23 @@ public class MainActivity extends Activity {
             photo.bitmap.recycle();
             main.post(() -> {
                 if (isDestroyed()) return;
+                // The old photo stays on top for a moment and fades away over the new one.
+                android.graphics.Bitmap old = GlassView.backdrop.wallpaper;
+                View fading = new View(this) {
+                    final Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
+                    final Rect dst = new Rect();
+                    @Override protected void onDraw(Canvas c) {
+                        dst.set(0, 0, getWidth(), getHeight());
+                        c.drawBitmap(old, null, dst, p);
+                    }
+                };
+                root.addView(fading, 1, match());
                 GlassView.backdrop = backdrop;
                 credit.setText(photo.credit);
                 wallpaperView.invalidate();
                 GlassView.refresh(root);
+                fading.animate().alpha(0f).setDuration(1400)
+                        .withEndAction(() -> root.removeView(fading)).start();
             });
         });
     }
@@ -420,6 +465,10 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setClipChildren(false);
+        // Pills that appear, go or change width slide into place instead of jumping.
+        LayoutTransition slide = new LayoutTransition();
+        slide.enableTransitionType(LayoutTransition.CHANGING);
+        row.setLayoutTransition(slide);
 
         LinearLayout clock = new LinearLayout(this);
         clock.setOrientation(LinearLayout.VERTICAL);
@@ -435,8 +484,7 @@ public class MainActivity extends Activity {
         weather = text(26, "sans-serif-medium", 0xF2FFFFFF);
         weather.setPadding(px(28), 0, px(28), 0);
         weather.setGravity(Gravity.CENTER);
-        GlassView weatherPill = new GlassView(this, u, px(36));
-        weatherPill.addView(weather, new FrameLayout.LayoutParams(-2, -1, Gravity.CENTER));
+        View weatherPill = button(weather, this::openForecast);
         weatherPill.setVisibility(View.GONE);
         row.addView(weatherPill, barItem());
 
@@ -462,28 +510,24 @@ public class MainActivity extends Activity {
     private View livePill() {
         live = new GlassView(this, u, px(36));
         live.setVisibility(View.GONE);
+        live.setFocusable(true);
+        live.setClickable(true);
+        live.setOnClickListener(v -> {
+            if (shownLive != null) openMatch(shownLive);
+        });
+        live.setOnFocusChangeListener((v, focused) -> {
+            live.setLit(focused);
+            live.animate().scaleX(focused ? 1.05f : 1f).scaleY(focused ? 1.05f : 1f).setDuration(140).start();
+        });
         LinearLayout in = new LinearLayout(this);
         in.setGravity(Gravity.CENTER_VERTICAL);
-        in.setPadding(px(26), 0, px(28), 0);
-        // The dot grows past its own box while it pulses.
-        in.setClipChildren(false);
+        in.setPadding(px(16), 0, px(28), 0);
         live.addView(in, new FrameLayout.LayoutParams(-2, -1));
+        liveContent = in;
 
-        liveDot = new View(this);
-        android.graphics.drawable.GradientDrawable red = new android.graphics.drawable.GradientDrawable();
-        red.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        red.setColor(0xFFFF453A);
-        liveDot.setBackground(red);
-        in.addView(liveDot, new LinearLayout.LayoutParams(px(16), px(16)));
-        // Animates only the dot's scale and alpha, which the GPU does without repainting the pill.
-        pulse = ObjectAnimator.ofPropertyValuesHolder(liveDot,
-                PropertyValuesHolder.ofFloat(View.SCALE_X, 0.85f, 1.3f),
-                PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.85f, 1.3f),
-                PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.35f));
-        pulse.setDuration(1300);
-        pulse.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
-        pulse.setRepeatCount(ObjectAnimator.INFINITE);
-        pulse.setRepeatMode(ObjectAnimator.REVERSE);
+        LiveDot dot = new LiveDot(this, u);
+        in.addView(dot, new LinearLayout.LayoutParams(dot.size(), dot.size()));
+        pulse = dot.pulse;
 
         liveClock = text(24, "sans-serif-medium", 0xFFFF6961);
         liveClock.setPadding(px(14), 0, px(16), 0);
@@ -706,11 +750,7 @@ public class MainActivity extends Activity {
         int at = favs.indexOf(pkg);
 
         sheetPackage = pkg;
-        sheetBlocks = appsLayer != null ? appsLayer : home;
-        sheetBlocks.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        sheet = new FrameLayout(this);
-        sheet.setBackgroundColor(0x80000000);
-        sheet.setClickable(true);
+        newSheet();
 
         GlassView panel = new GlassView(this, u, px(44));
         panel.setElevation(px(30));
@@ -741,6 +781,176 @@ public class MainActivity extends Activity {
         list.getChildAt(1).requestFocus();
     }
 
+    /** The dimmed layer for a menu or a panel; what is behind it can't take focus meanwhile. */
+    private void newSheet() {
+        sheetReturn = getCurrentFocus();
+        sheetBlocks = appsLayer != null ? appsLayer : home;
+        sheetBlocks.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        sheet = new FrameLayout(this);
+        sheet.setBackgroundColor(0x80000000);
+        sheet.setClickable(true);
+    }
+
+    /** The next seven days in Salta, in a glass panel. */
+    private void openForecast() {
+        if (forecast == null) return;
+        sheetPackage = null;
+        newSheet();
+        GlassView panel = new GlassView(this, u, px(44));
+        panel.setElevation(px(30));
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        column.setPadding(px(48), px(40), px(48), px(40));
+        panel.addView(column);
+
+        TextView title = text(38, "sans-serif-medium", 0xFFFFFFFF);
+        title.setText("Salta · próximos 7 días");
+        column.addView(title);
+
+        LinearLayout days = new LinearLayout(this);
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
+        dp.topMargin = px(32);
+        column.addView(days, dp);
+        SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        SimpleDateFormat name = new SimpleDateFormat("EEE d", ES);
+        for (int i = 0; i < forecast.days.length; i++) {
+            Weather.Day d = forecast.days[i];
+            String label;
+            try {
+                label = i == 0 ? "Hoy" : name.format(iso.parse(d.date)).replace(".", "");
+            } catch (java.text.ParseException e) {
+                label = d.date;
+            }
+            LinearLayout day = new LinearLayout(this);
+            day.setOrientation(LinearLayout.VERTICAL);
+            day.setGravity(Gravity.CENTER_HORIZONTAL);
+            TextView l = text(26, "sans-serif-medium", 0xE6FFFFFF);
+            l.setText(label.substring(0, 1).toUpperCase(ES) + label.substring(1));
+            TextView icon = text(56, "sans-serif", 0xFFFFFFFF);
+            icon.setText(d.icon);
+            icon.setPadding(0, px(10), 0, px(6));
+            TextView max = text(34, "sans-serif-medium", 0xFFFFFFFF);
+            max.setText(d.max + "°");
+            TextView min = text(26, "sans-serif", 0xA6FFFFFF);
+            min.setText(d.min + "°");
+            TextView rain = text(22, "sans-serif-medium", d.rain >= 40 ? 0xFF7CC4FF : 0x8CFFFFFF);
+            rain.setText("💧 " + d.rain + "%");
+            rain.setPadding(0, px(8), 0, 0);
+            day.addView(l);
+            day.addView(icon);
+            day.addView(max);
+            day.addView(min);
+            day.addView(rain);
+            days.addView(day, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+
+        View close = pill("Cerrar", this::closeSheet);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(px(260), px(76));
+        cp.topMargin = px(36);
+        column.addView(close, cp);
+
+        sheet.addView(panel, new FrameLayout.LayoutParams(px(1360), -2, Gravity.CENTER));
+        root.addView(sheet, match());
+        close.requestFocus();
+    }
+
+    /** The match in full: the score, and who scored and who was sent off, minute by minute. */
+    private void openMatch(Matches.Match m) {
+        sheetPackage = null;
+        newSheet();
+        GlassView panel = new GlassView(this, u, px(44));
+        panel.setElevation(px(30));
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        column.setPadding(px(56), px(40), px(56), px(40));
+        panel.addView(column);
+        matchBody = new LinearLayout(this);
+        matchBody.setOrientation(LinearLayout.VERTICAL);
+        column.addView(matchBody, new LinearLayout.LayoutParams(-1, -2));
+        matchId = m.id;
+        fillMatch(m);
+
+        View close = pill("Cerrar", this::closeSheet);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(px(260), px(76));
+        cp.topMargin = px(36);
+        column.addView(close, cp);
+        sheet.addView(panel, new FrameLayout.LayoutParams(px(1180), -2, Gravity.CENTER));
+        root.addView(sheet, match());
+        close.requestFocus();
+    }
+
+    private void fillMatch(Matches.Match m) {
+        matchBody.removeAllViews();
+        TextView league = text(26, "sans-serif-medium", 0xB3FFFFFF);
+        SpannableString head = new SpannableString(m.league + "   " + (m.live ? "● " : "") + m.status);
+        if (m.live) {
+            int from = m.league.length() + 3;
+            head.setSpan(new ForegroundColorSpan(0xFFFF6961), from, head.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        league.setText(head);
+        league.setGravity(Gravity.CENTER);
+        matchBody.addView(league, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout score = new LinearLayout(this);
+        score.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, -2);
+        sp.topMargin = px(28);
+        matchBody.addView(score, sp);
+        score.addView(team(m.home), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView result = text(88, "sans-serif-light", 0xFFFFFFFF);
+        result.setText(m.home.goals + " – " + m.away.goals);
+        result.setGravity(Gravity.CENTER);
+        score.addView(result, new LinearLayout.LayoutParams(px(300), -2));
+        score.addView(team(m.away), new LinearLayout.LayoutParams(0, -2, 1));
+
+        if (m.events.isEmpty()) {
+            TextView none = text(26, "sans-serif", 0x99FFFFFF);
+            none.setText("Todavía no hubo goles.");
+            none.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, -2);
+            np.topMargin = px(32);
+            matchBody.addView(none, np);
+            return;
+        }
+        // Each team's goals under its own crest, in the order they happened.
+        LinearLayout lists = new LinearLayout(this);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = px(32);
+        matchBody.addView(lists, lp);
+        LinearLayout home = new LinearLayout(this), away = new LinearLayout(this);
+        home.setOrientation(LinearLayout.VERTICAL);
+        away.setOrientation(LinearLayout.VERTICAL);
+        home.setGravity(Gravity.CENTER_HORIZONTAL);
+        away.setGravity(Gravity.CENTER_HORIZONTAL);
+        lists.addView(home, new LinearLayout.LayoutParams(0, -2, 1));
+        lists.addView(new View(this), new LinearLayout.LayoutParams(px(300), 1));
+        lists.addView(away, new LinearLayout.LayoutParams(0, -2, 1));
+        for (Matches.Event e : m.events) {
+            TextView line = text(27, "sans-serif", 0xF2FFFFFF);
+            String note = e.penalty ? " (penal)" : e.ownGoal ? " (en contra)" : "";
+            line.setText((e.goal ? "⚽  " : "🟥  ") + e.player + "  " + e.minute + note);
+            line.setPadding(0, px(6), 0, px(6));
+            (e.home ? home : away).addView(line);
+        }
+    }
+
+    /** A crest with the team's name under it. */
+    private View team(Matches.Side side) {
+        LinearLayout t = new LinearLayout(this);
+        t.setOrientation(LinearLayout.VERTICAL);
+        t.setGravity(Gravity.CENTER_HORIZONTAL);
+        ImageView crest = crest();
+        crest.setImageBitmap(side.logo == null ? null : logos.get(side.logo));
+        t.addView(crest, new LinearLayout.LayoutParams(px(110), px(110)));
+        TextView name = text(32, "sans-serif-medium", 0xFFFFFFFF);
+        name.setText(side.name);
+        name.setPadding(0, px(14), 0, 0);
+        t.addView(name);
+        return t;
+    }
+
     private void sheetButton(LinearLayout list, String label, Runnable action) {
         View b = pill(label, () -> {
             if (action != null) {
@@ -765,9 +975,10 @@ public class MainActivity extends Activity {
         if (sheet == null) return;
         root.removeView(sheet);
         sheet = null;
+        matchBody = null;
         sheetBlocks.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        View back = findTile(sheetBlocks, sheetPackage);
-        if (back != null) back.requestFocus();
+        View back = sheetPackage == null ? sheetReturn : findTile(sheetBlocks, sheetPackage);
+        if (back != null && back.isAttachedToWindow()) back.requestFocus();
         else if (sheetBlocks == home) focusFirst();
     }
 

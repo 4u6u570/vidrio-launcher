@@ -74,6 +74,15 @@ final class NowPlaying extends GlassView {
         listener = new ComponentName(context, MediaListener.class);
         setElevation(4 * u);
         setVisibility(GONE);
+        // Selectable: OK opens the app that is playing.
+        setFocusable(true);
+        setClickable(true);
+        setOnClickListener(v -> openApp());
+        setOnFocusChangeListener((v, focused) -> {
+            setLit(focused);
+            animate().scaleX(focused ? 1.05f : 1f).scaleY(focused ? 1.05f : 1f)
+                    .translationZ(focused ? 20 * u : 0).setDuration(170).start();
+        });
 
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
@@ -205,13 +214,29 @@ final class NowPlaying extends GlassView {
                 state, cover);
     }
 
+    /** How long the last song stays on the card after its app stops reporting it. */
+    private static final long LINGER_MS = 60L * 60 * 1000;
+    private String lastPkg, lastName, lastBy;
+    private long lastSeen;
+
     private void show(String pkg, String name, String by, int state, Bitmap cover) {
         boolean nowPlaying = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING;
         if (pkg == null || name.isEmpty() || !(nowPlaying || state == PlaybackState.STATE_PAUSED)) {
-            setDancing(false);
-            setVisibility(GONE);
+            // Spotify drops its session a while after the music stops, and the stick closes
+            // apps to save memory. The last song stays, paused, for an hour all the same.
+            if (lastPkg != null && System.currentTimeMillis() - lastSeen < LINGER_MS) {
+                setDancing(false);
+                setVisibility(VISIBLE);
+            } else {
+                setDancing(false);
+                setVisibility(GONE);
+            }
             return;
         }
+        lastPkg = pkg;
+        lastName = name;
+        lastBy = by;
+        lastSeen = System.currentTimeMillis();
         title.setText(name);
         artist.setText(by.isEmpty() ? appName(pkg) : by);
 
@@ -240,6 +265,20 @@ final class NowPlaying extends GlassView {
                 dance[i].pause();
                 bars[i].setScaleY(0.25f);
             }
+        }
+    }
+
+    /** Opens the app on the card, the TV version when it has one. */
+    private void openApp() {
+        if (lastPkg == null) return;
+        PackageManager pm = getContext().getPackageManager();
+        android.content.Intent open = pm.getLeanbackLaunchIntentForPackage(lastPkg);
+        if (open == null) open = pm.getLaunchIntentForPackage(lastPkg);
+        if (open == null) return;
+        try {
+            getContext().startActivity(open.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (android.content.ActivityNotFoundException ignored) {
+            // The app went away.
         }
     }
 

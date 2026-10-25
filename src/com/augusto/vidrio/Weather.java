@@ -1,34 +1,63 @@
 package com.augusto.vidrio;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** The weather in Salta from Open-Meteo: free, no key. Call it off the main thread. */
+/**
+ * The weather in Salta from Open-Meteo: free, no key. Now and the next seven days, in one
+ * request. Call it off the main thread.
+ */
 final class Weather {
     private static final String URL = "https://api.open-meteo.com/v1/forecast"
             + "?latitude=-24.7859&longitude=-65.4117"
             + "&current=temperature_2m,weather_code,is_day"
-            + "&daily=temperature_2m_max,temperature_2m_min"
-            + "&timezone=America%2FArgentina%2FSalta&forecast_days=1";
+            + "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+            + "&timezone=America%2FArgentina%2FSalta&forecast_days=7";
 
-    final int now, max, min;
+    static final class Day {
+        /** "2026-10-25" */
+        final String date;
+        final int max, min, rain;
+        final String icon;
+
+        Day(String date, int max, int min, int rain, String icon) {
+            this.date = date;
+            this.max = max;
+            this.min = min;
+            this.rain = rain;
+            this.icon = icon;
+        }
+    }
+
+    final int now;
     final String icon;
+    final Day[] days;
 
-    private Weather(int now, int max, int min, String icon) {
+    private Weather(int now, String icon, Day[] days) {
         this.now = now;
-        this.max = max;
-        this.min = min;
         this.icon = icon;
+        this.days = days;
     }
 
     static Weather fetch() throws Exception {
         JSONObject r = new JSONObject(Net.text(URL));
         JSONObject current = r.getJSONObject("current");
         JSONObject daily = r.getJSONObject("daily");
-        return new Weather(
-                (int) Math.round(current.getDouble("temperature_2m")),
-                (int) Math.round(daily.getJSONArray("temperature_2m_max").getDouble(0)),
-                (int) Math.round(daily.getJSONArray("temperature_2m_min").getDouble(0)),
-                icon(current.getInt("weather_code"), current.optInt("is_day", 1) == 1));
+        JSONArray dates = daily.getJSONArray("time");
+        Day[] days = new Day[dates.length()];
+        for (int i = 0; i < days.length; i++) {
+            days[i] = new Day(dates.getString(i),
+                    round(daily.getJSONArray("temperature_2m_max"), i),
+                    round(daily.getJSONArray("temperature_2m_min"), i),
+                    daily.getJSONArray("precipitation_probability_max").optInt(i, 0),
+                    icon(daily.getJSONArray("weather_code").optInt(i, 3), true));
+        }
+        return new Weather((int) Math.round(current.getDouble("temperature_2m")),
+                icon(current.getInt("weather_code"), current.optInt("is_day", 1) == 1), days);
+    }
+
+    private static int round(JSONArray a, int i) {
+        return (int) Math.round(a.optDouble(i, 0));
     }
 
     /** WMO weather codes, as Open-Meteo sends them. */

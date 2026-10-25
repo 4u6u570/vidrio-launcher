@@ -20,10 +20,10 @@ import java.util.Locale;
 import java.util.Random;
 
 /**
- * A photo of Salta for each day, from Wikimedia Commons: free, no key, and every photo there
+ * A photo of Salta every twenty minutes, from Wikimedia Commons: free, no key, and every photo there
  * carries a license that allows this. Only "quality images" are used, which are sharp and
- * large. The list of candidates is fetched once a week and the day's photo once a day, so the
- * launcher downloads one picture a day and nothing else. All of it runs off the main thread.
+ * large. The list of candidates is fetched once a week and a photo every twenty minutes, so the
+ * launcher downloads three small pictures an hour, only while it is on screen. All of it runs off the main thread.
  */
 final class Wallpapers {
     /** Places in Salta that have quality photos on Commons. */
@@ -60,9 +60,12 @@ final class Wallpapers {
         return b == null ? null : new Photo(b, prefs.getString("credito", ""));
     }
 
-    /** Today's photo, downloading a new one if the day changed; null if nothing changed. */
+    /** The photo for these twenty minutes, downloading a new one when they change; null if nothing changed. */
     Photo today(boolean force) throws Exception {
-        String day = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
+        // One photo every twenty minutes: the key changes three times an hour.
+        java.util.Calendar now = java.util.Calendar.getInstance();
+        String day = new SimpleDateFormat("yyyyMMddHH", Locale.US).format(now.getTime())
+                + now.get(java.util.Calendar.MINUTE) / 20;
         if (!force && day.equals(prefs.getString("dia", "")) && image.exists()) return null;
 
         List<String> titles = candidates();
