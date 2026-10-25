@@ -65,8 +65,8 @@ public class MainActivity extends Activity {
     private static final String FAVORITES = "favoritos";
     /** Picked as the first favorites when they are installed. */
     private static final List<String> SUGGESTED = Arrays.asList(
-            "org.smarttube.stable", "com.stremio.one", "com.google.android.youtube.tv",
-            "com.netflix.ninja", "tunein.player", "com.android.vending");
+            "com.spotify.tv.android", "tunein.player", "com.phlox.tvwebbrowser", "com.android.vending",
+            "org.smarttube.stable", "com.google.android.youtube.tv", "com.netflix.ninja");
     private static final int COLUMNS = 5, GAP = 36, SIDE = 96;
 
     private float u;
@@ -766,18 +766,26 @@ public class MainActivity extends Activity {
         sheetPackage = pkg;
         newSheet();
 
+        // A side panel that slides in from the right, as on Apple TV.
         GlassView panel = new GlassView(this, u, px(44));
         panel.setElevation(px(30));
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(px(40), px(36), px(40), px(40));
-        panel.addView(list);
+        list.setGravity(Gravity.CENTER_VERTICAL);
+        list.setPadding(px(40), px(40), px(40), px(40));
+        panel.addView(list, new FrameLayout.LayoutParams(-1, -1));
 
-        TextView title = text(40, "sans-serif-medium", 0xFFFFFFFF);
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(app.banner != null ? app.banner : app.icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        list.addView(icon, new LinearLayout.LayoutParams(-1, px(150)));
+        TextView title = text(38, "sans-serif-medium", 0xFFFFFFFF);
         title.setText(app.label);
         title.setGravity(Gravity.CENTER);
-        title.setPadding(0, 0, 0, px(12));
+        title.setPadding(0, px(18), 0, px(12));
         list.addView(title);
+
+        sheetButton(list, "Abrir", () -> tile.performClick());
 
         if (at < 0) {
             sheetButton(list, "Agregar a favoritos", () -> { favs.add(pkg); saveFavorites(favs); });
@@ -788,11 +796,31 @@ public class MainActivity extends Activity {
         }
         sheetButton(list, "Información de la app", () -> launch(
                 new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + pkg))));
+        // Apps that came with the system can't be uninstalled, only disabled from their info.
+        if (!isSystemApp(pkg)) {
+            sheetButton(list, "Desinstalar", () -> launch(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + pkg))));
+        }
         sheetButton(list, "Cancelar", null);
 
-        sheet.addView(panel, new FrameLayout.LayoutParams(px(680), -2, Gravity.CENTER));
+        FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(px(600), -1, Gravity.END);
+        pp.topMargin = pp.bottomMargin = pp.rightMargin = px(36);
+        sheet.addView(panel, pp);
         root.addView(sheet, match());
-        list.getChildAt(1).requestFocus();
+        panel.setTranslationX(px(660));
+        panel.animate().translationX(0).setDuration(260)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        sheet.setAlpha(0f);
+        sheet.animate().alpha(1f).setDuration(200).start();
+        list.getChildAt(2).requestFocus();
+    }
+
+    private boolean isSystemApp(String pkg) {
+        try {
+            int flags = getPackageManager().getApplicationInfo(pkg, 0).flags;
+            return (flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0;
+        } catch (PackageManager.NameNotFoundException e) {
+            return true;
+        }
     }
 
     /** The dimmed layer for a menu or a panel; what is behind it can't take focus meanwhile. */

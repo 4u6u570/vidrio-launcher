@@ -3,6 +3,8 @@
     package="com.augusto.vidrio">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lets "Desinstalar" in an app's menu ask Android to remove it; Android still asks first. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- Granted by hand with adb (see NowPlaying): lets the card read what is playing. -->
     <uses-permission android:name="android.permission.DUMP" />
 

@@ -38,6 +38,15 @@ final class Wallpapers {
             "Iruya", "\"Valles Calchaquíes\"", "\"San Antonio de los Cobres\""};
     private static final String API = "https://commons.wikimedia.org/w/api.php?format=json&action=query";
     private static final long WEEK = 7L * 24 * 60 * 60 * 1000;
+    /**
+     * Titles that give away a chart, a labelled sky, a diagram or a collage rather than a
+     * photo: they look poor full screen. ESO's "picture of the week" (iotw) are often labelled.
+     */
+    private static final java.util.regex.Pattern NOT_A_PHOTO = java.util.regex.Pattern.compile(
+            "(?i)annotat|label|iotw|chart|\\bmap\\b|diagram|poster|sequence|path|transit|comparison|collage"
+                    + "|anim|illustration|artist|render|360|panorama|mosaic of|scale");
+    /** Raised when the rules above change, so lists and photos picked by older rules go. */
+    private static final int RULES = 2;
 
     static final class Photo {
         final Bitmap bitmap;
@@ -57,12 +66,16 @@ final class Wallpapers {
         image = new File(context.getFilesDir(), "fondo.jpg");
         dir = context.getFilesDir();
         new File(dir, "fondos.txt").delete(); // The list from before there were themes.
+        for (int r = 0; r < RULES; r++) {
+            new File(dir, "fondos-" + ASTRONOMY + (r == 0 ? "" : "-r" + r) + ".txt").delete();
+            new File(dir, "fondos-" + SALTA + (r == 0 ? "" : "-r" + r) + ".txt").delete();
+        }
         prefs = context.getSharedPreferences("fondos", Context.MODE_PRIVATE);
     }
 
     /** The photo already on disk, if it belongs to this theme. Quick enough for startup. */
     Photo cached(int theme) {
-        if (!image.exists() || prefs.getInt("tema", -1) != theme) return null;
+        if (!image.exists() || prefs.getInt("tema", -1) != theme || prefs.getInt("reglas", 0) != RULES) return null;
         Bitmap b = BitmapFactory.decodeFile(image.getPath());
         return b == null ? null : new Photo(b, prefs.getString("credito", ""));
     }
@@ -74,7 +87,7 @@ final class Wallpapers {
         int minuteOfDay = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE);
         String day = new SimpleDateFormat("yyyyMMdd", Locale.US).format(now.getTime())
                 + "-" + minuteOfDay / periodMinutes;
-        boolean sameTheme = prefs.getInt("tema", -1) == theme;
+        boolean sameTheme = prefs.getInt("tema", -1) == theme && prefs.getInt("reglas", 0) == RULES;
         if (!force && sameTheme && day.equals(prefs.getString("dia", "")) && image.exists()) return null;
 
         List<String> titles = candidates(theme);
@@ -101,14 +114,14 @@ final class Wallpapers {
         String name = plain(field(meta, "ObjectName"), 60);
         String credit = (name.isEmpty() ? placeOf(title) : name) + (artist.isEmpty() ? "" : " · Foto: " + artist)
                 + (license.isEmpty() ? "" : ", " + license);
-        prefs.edit().putString("dia", day).putInt("tema", theme).putString("titulo", title)
+        prefs.edit().putString("dia", day).putInt("tema", theme).putInt("reglas", RULES).putString("titulo", title)
                 .putString("credito", credit).apply();
         return new Photo(b, credit);
     }
 
     /** Wide photos of the theme, refreshed once a week. */
     private List<String> candidates(int theme) throws Exception {
-        File list = new File(dir, "fondos-" + theme + ".txt");
+        File list = new File(dir, "fondos-" + theme + "-r" + RULES + ".txt");
         List<String> titles = new ArrayList<>();
         if (list.exists() && System.currentTimeMillis() - list.lastModified() < WEEK) {
             try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.FileReader(list))) {
@@ -118,7 +131,7 @@ final class Wallpapers {
         }
         String[] queries = theme == SALTA ? PLACES : SKY;
         for (String q : queries) {
-            JSONObject r = new JSONObject(Net.text(API + "&prop=imageinfo&iiprop=size" + (theme == SALTA
+            JSONObject r = new JSONObject(Net.text(API + "&prop=imageinfo&iiprop=size%7Cmime" + (theme == SALTA
                     ? "&generator=search&gsrnamespace=6&gsrlimit=100&gsrsearch="
                             + Uri.encode("intitle:" + q + " incategory:Quality_images")
                     : "&generator=categorymembers&gcmtype=file&gcmlimit=500&gcmtitle=" + Uri.encode("Category:" + q))));
@@ -129,7 +142,12 @@ final class Wallpapers {
                 if (p.optJSONArray("imageinfo") == null) continue;
                 JSONObject size = p.getJSONArray("imageinfo").getJSONObject(0);
                 int w = size.getInt("width"), h = size.getInt("height");
-                if (w >= 1920 && w > h * 1.3) titles.add(p.getString("title"));
+                String title = p.getString("title");
+                // Big, close to the screen's shape, a real photo: nothing gets upscaled or squashed.
+                boolean sharp = w >= 2560 && h >= 1300;
+                boolean shape = w >= h * 1.45f && w <= h * 2.2f;
+                boolean photo = "image/jpeg".equals(size.optString("mime")) && !NOT_A_PHOTO.matcher(title).find();
+                if (sharp && shape && photo) titles.add(title);
             }
         }
         if (!titles.isEmpty()) {
