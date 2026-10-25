@@ -52,6 +52,7 @@ final class NowPlaying extends GlassView {
 
     private final LruCache<String, Bitmap> covers = new LruCache<>(8);
     private String coverKey = "";
+    private final java.util.Map<String, Long> lookedUp = new java.util.HashMap<>();
 
     private final MediaController.Callback callback = new MediaController.Callback() {
         @Override public void onPlaybackStateChanged(PlaybackState state) {
@@ -245,9 +246,15 @@ final class NowPlaying extends GlassView {
             art.setImageBitmap(cover);
         } else if (covers.get(key) != null) {
             art.setImageBitmap(covers.get(key));
-        } else if (!key.equals(coverKey)) {
-            art.setImageDrawable(appIcon(pkg));
-            if (isMusic(pkg)) lookUpCover(key, name, by);
+        } else {
+            if (!key.equals(coverKey)) art.setImageDrawable(appIcon(pkg));
+            // Asks again every couple of minutes if the cover didn't come: the network fails.
+            Long tried = lookedUp.get(key);
+            long now = System.currentTimeMillis();
+            if (isMusic(pkg) && (tried == null || now - tried > 120_000)) {
+                lookedUp.put(key, now);
+                lookUpCover(key, name, by);
+            }
         }
         coverKey = key;
         setDancing(nowPlaying);
@@ -297,6 +304,7 @@ final class NowPlaying extends GlassView {
             try {
                 JSONArray results = new JSONObject(Net.text("https://itunes.apple.com/search?entity=song&limit=1"
                         + "&country=AR&term=" + Uri.encode(by + " " + song))).getJSONArray("results");
+                android.util.Log.i("Vidrio", "Portada de " + key + ": " + results.length() + " resultado(s)");
                 if (results.length() == 0) return;
                 String url = results.getJSONObject(0).getString("artworkUrl100").replace("100x100bb", "400x400bb");
                 byte[] jpg = Net.get(url);

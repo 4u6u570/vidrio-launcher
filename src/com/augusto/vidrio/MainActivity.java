@@ -22,8 +22,6 @@ import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -78,7 +76,7 @@ public class MainActivity extends Activity {
 
     private FrameLayout root, home;
     private LinearLayout favoritesRow;
-    private TextView time, date, network;
+    private TextView time, date;
     /** The screen with every app; null while closed. */
     private FrameLayout appsLayer;
     private LinearLayout grid;
@@ -93,11 +91,6 @@ public class MainActivity extends Activity {
             updateClock();
             // A new photo every twenty minutes.
             if (visible && java.util.Calendar.getInstance().get(java.util.Calendar.MINUTE) % 20 == 0) refreshWallpaper();
-        }
-    };
-    private final BroadcastReceiver networkReceiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) {
-            updateNetwork();
         }
     };
     private final BroadcastReceiver packageReceiver = new BroadcastReceiver() {
@@ -198,14 +191,12 @@ public class MainActivity extends Activity {
         clock.addAction(Intent.ACTION_TIME_CHANGED);
         clock.addAction(Intent.ACTION_TIMEZONE_CHANGED);
         registerReceiver(clockReceiver, clock);
-        registerReceiver(networkReceiver, new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION));
     }
 
     @Override protected void onResume() {
         super.onResume();
         visible = true;
         updateClock();
-        updateNetwork();
         refreshWallpaper();
         refreshWeather();
         nowPlaying.start();
@@ -227,7 +218,6 @@ public class MainActivity extends Activity {
         worker.shutdownNow();
         unregisterReceiver(packageReceiver);
         unregisterReceiver(clockReceiver);
-        unregisterReceiver(networkReceiver);
         super.onDestroy();
     }
 
@@ -488,10 +478,6 @@ public class MainActivity extends Activity {
         weatherPill.setVisibility(View.GONE);
         row.addView(weatherPill, barItem());
 
-        network = text(26, "sans-serif-medium", 0xF2FFFFFF);
-        network.setPadding(px(30), 0, px(30), 0);
-        network.setGravity(Gravity.CENTER);
-        row.addView(button(network, () -> openInPlace(new Intent(Settings.ACTION_WIFI_SETTINGS))), barItem());
 
         View settings = pill("Ajustes", () -> openInPlace(new Intent(Settings.ACTION_SETTINGS)));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, px(72));
@@ -552,16 +538,6 @@ public class MainActivity extends Activity {
         Date now = new Date();
         time.setText(new SimpleDateFormat("HH:mm", ES).format(now));
         date.setText(new SimpleDateFormat("EEEE d 'de' MMMM", ES).format(now));
-    }
-
-    private void updateNetwork() {
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
-        NetworkInfo info = cm == null ? null : cm.getActiveNetworkInfo();
-        boolean up = info != null && info.isConnected();
-        String label = up ? (info.getType() == ConnectivityManager.TYPE_ETHERNET ? "Cable" : "Wi-Fi") : "Sin conexión";
-        SpannableString s = new SpannableString("●  " + label);
-        s.setSpan(new ForegroundColorSpan(up ? 0xFF30D158 : 0xFFFF453A), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        network.setText(s);
     }
 
     // ---- Apps ----
