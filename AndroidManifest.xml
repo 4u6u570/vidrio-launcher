@@ -8,7 +8,7 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <application
-        android:label="Vidrio"
+        android:label="Vidrio Launcher"
         android:icon="@drawable/icon"
         android:banner="@drawable/banner"
         android:theme="@style/Vidrio"

@@ -12,8 +12,12 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Canvas;
+import android.graphics.ColorFilter;
 import android.graphics.Paint;
+import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
@@ -30,7 +34,6 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -45,6 +48,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * Home: the clock on top, an empty middle kept free for widgets, and one row of favorites along
+ * the bottom that starts with the way into every installed app. New apps join the row by themselves.
+ */
 public class MainActivity extends Activity {
     private static final Locale ES = new Locale("es", "AR");
     private static final String FAVORITES = "favoritos";
@@ -55,15 +62,19 @@ public class MainActivity extends Activity {
     private static final int COLUMNS = 5, GAP = 36, SIDE = 96;
 
     private float u;
+    private int tileW, tileH;
     private SharedPreferences prefs;
     private final Map<String, AppTile.App> apps = new LinkedHashMap<>();
 
-    private FrameLayout root;
-    private ScrollView scroll;
-    private LinearLayout content, favoritesRow, grid;
+    private FrameLayout root, home;
+    private LinearLayout favoritesRow;
     private TextView time, date, network;
+    /** The screen with every app; null while closed. */
+    private FrameLayout appsLayer;
+    private LinearLayout grid;
     private FrameLayout sheet;
-    private View sheetReturnFocus;
+    private ViewGroup sheetBlocks;
+    private String sheetPackage;
 
     private final BroadcastReceiver clockReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
@@ -78,7 +89,18 @@ public class MainActivity extends Activity {
     private final BroadcastReceiver packageReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             loadApps();
-            buildRows();
+            String pkg = i.getData() == null ? null : i.getData().getSchemeSpecificPart();
+            boolean fresh = Intent.ACTION_PACKAGE_ADDED.equals(i.getAction())
+                    && !i.getBooleanExtra(Intent.EXTRA_REPLACING, false);
+            if (fresh && apps.containsKey(pkg)) {
+                List<String> favs = favorites();
+                if (!favs.contains(pkg)) {
+                    favs.add(pkg);
+                    saveFavorites(favs);
+                }
+            }
+            buildFavorites();
+            if (appsLayer != null) buildGrid();
         }
     };
 
@@ -90,68 +112,50 @@ public class MainActivity extends Activity {
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
 
         u = getResources().getDisplayMetrics().widthPixels / 1920f;
+        tileW = (px(1920 - 2 * SIDE) - (COLUMNS - 1) * px(GAP)) / COLUMNS;
+        tileH = tileW * 9 / 16;
         prefs = getSharedPreferences("vidrio", MODE_PRIVATE);
         if (GlassView.backdrop == null) GlassView.backdrop = new Backdrop();
 
         root = new FrameLayout(this);
         root.addView(new View(this) {
             final Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
-            final android.graphics.Rect dst = new android.graphics.Rect();
+            final Rect dst = new Rect();
             @Override protected void onDraw(Canvas c) {
                 dst.set(0, 0, getWidth(), getHeight());
                 c.drawBitmap(GlassView.backdrop.wallpaper, null, dst, p);
             }
         }, match());
 
-        scroll = new ScrollView(this) {
-            @Override protected void onScrollChanged(int l, int t, int ol, int ot) {
-                super.onScrollChanged(l, t, ol, ot);
-                GlassView.refresh(this);
-            }
-        };
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroll.setClipChildren(false);
-        content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setClipChildren(false);
-        content.setClipToPadding(false);
-        content.setPadding(px(SIDE), px(56), px(SIDE), px(120));
-        scroll.addView(content, new FrameLayout.LayoutParams(-1, -2));
-        root.addView(scroll, match());
+        home = new FrameLayout(this);
+        home.setClipChildren(false);
+        root.addView(home, match());
 
-        content.addView(header());
-        content.addView(section("Favoritos"));
-        HorizontalScrollView favScroll = new HorizontalScrollView(this) {
-            @Override protected void onScrollChanged(int l, int t, int ol, int ot) {
-                super.onScrollChanged(l, t, ol, ot);
-                GlassView.refresh(this);
-            }
-        };
-        favScroll.setHorizontalScrollBarEnabled(false);
-        favScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        favScroll.setClipChildren(false);
-        favScroll.setClipToPadding(false);
+        FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
+        hp.leftMargin = hp.rightMargin = px(SIDE);
+        hp.topMargin = px(56);
+        home.addView(header(), hp);
+
+        // The row slides on its own instead of scrolling, so the focused card always keeps the
+        // side margin: a scroll view stops with the last card flush against the screen edge.
+        FrameLayout strip = new FrameLayout(this);
+        strip.setClipChildren(false);
+        strip.setClipToPadding(false);
+        // Room for a focused card to grow and show its name without being cut off.
+        strip.setPadding(px(SIDE), px(40), px(SIDE), px(72));
         favoritesRow = new LinearLayout(this);
         favoritesRow.setClipChildren(false);
-        favScroll.addView(favoritesRow);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.leftMargin = lp.rightMargin = -px(SIDE);
-        // Runs edge to edge, with room for a focused card to grow and show its name.
-        favScroll.setPadding(px(SIDE), px(24), px(SIDE), px(64));
-        content.addView(favScroll, lp);
-
-        content.addView(section("Apps"));
-        grid = new LinearLayout(this);
-        grid.setOrientation(LinearLayout.VERTICAL);
-        grid.setClipChildren(false);
-        grid.setClipToPadding(false);
-        grid.setPadding(0, px(24), 0, 0);
-        content.addView(grid);
+        strip.addView(favoritesRow, new FrameLayout.LayoutParams(-2, tileH));
+        FrameLayout.LayoutParams fp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        fp.bottomMargin = px(24);
+        home.addView(strip, fp);
+        root.getViewTreeObserver().addOnGlobalFocusChangeListener((was, now) -> {
+            if (now != null && now.getParent() == favoritesRow) slideTo(now);
+        });
 
         setContentView(root);
         loadApps();
-        buildRows();
+        buildFavorites();
         focusFirst();
 
         registerReceiver(packageReceiver, packageFilter());
@@ -175,16 +179,19 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    /** Pressing Home while already home goes back to the top. */
+    /** Pressing Home while already home goes back to the start of the row. */
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         closeSheet();
-        scroll.smoothScrollTo(0, 0);
+        closeApps();
+        favoritesRow.setTranslationX(0);
+        GlassView.refresh(favoritesRow);
         focusFirst();
     }
 
     @Override public void onBackPressed() {
         if (sheet != null) closeSheet();
+        else if (appsLayer != null) closeApps();
     }
 
     private boolean okDown, okHeld;
@@ -242,12 +249,11 @@ public class MainActivity extends Activity {
         clock.addView(date);
         row.addView(clock, new LinearLayout.LayoutParams(0, -2, 1));
 
-        GlassView status = new GlassView(this, u, px(36));
         network = text(26, "sans-serif-medium", 0xF2FFFFFF);
         network.setPadding(px(30), 0, px(30), 0);
         network.setGravity(Gravity.CENTER);
-        status.addView(network, new FrameLayout.LayoutParams(-2, px(72), Gravity.CENTER));
-        row.addView(status, new LinearLayout.LayoutParams(-2, px(72)));
+        row.addView(button(network, () -> openInPlace(new Intent(Settings.ACTION_WIFI_SETTINGS))),
+                new LinearLayout.LayoutParams(-2, px(72)));
 
         View settings = pill("Ajustes", () -> openInPlace(new Intent(Settings.ACTION_SETTINGS)));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, px(72));
@@ -312,41 +318,30 @@ public class MainActivity extends Activity {
         prefs.edit().putString(FAVORITES, String.join(",", list)).apply();
     }
 
-    private void buildRows() {
-        favoritesRow.removeAllViews();
-        grid.removeAllViews();
-        List<String> favs = favorites();
+    /** Slides the row just enough to keep the focused card inside the side margins. */
+    private void slideTo(View tile) {
+        float t = favoritesRow.getTranslationX();
+        float left = px(SIDE) + tile.getLeft() + t, right = left + tile.getWidth();
+        if (left < px(SIDE)) t += px(SIDE) - left;
+        else if (right > root.getWidth() - px(SIDE)) t -= right - (root.getWidth() - px(SIDE));
+        favoritesRow.animate().translationX(Math.min(0, t)).setDuration(220)
+                .setUpdateListener(a -> GlassView.refresh(favoritesRow)).start();
+    }
 
-        int favW = (px(1920 - 2 * SIDE) - 3 * px(GAP)) / 4;
-        int favH = favW * 9 / 16;
-        for (String p : favs) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(favW, favH);
-            if (favoritesRow.getChildCount() > 0) lp.leftMargin = px(GAP);
+    /** The bottom row: the way into every app, then the favorites. */
+    private void buildFavorites() {
+        favoritesRow.removeAllViews();
+        AppTile all = new AppTile(this, u, new AppTile.App(null, "Todas las apps", null, new GridIcon()));
+        all.setOnClickListener(v -> openApps());
+        favoritesRow.addView(all, new LinearLayout.LayoutParams(tileW, tileH));
+        for (String p : favorites()) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileW, tileH);
+            lp.leftMargin = px(GAP);
             favoritesRow.addView(tile(apps.get(p)), lp);
         }
-        if (favs.isEmpty()) {
-            TextView hint = text(28, "sans-serif-light", 0xB3FFFFFF);
-            hint.setText("Mantené apretado OK sobre una app para sumarla a favoritos.");
-            favoritesRow.addView(hint, new LinearLayout.LayoutParams(-2, favH / 2));
-        }
-
-        int w = (px(1920 - 2 * SIDE) - (COLUMNS - 1) * px(GAP)) / COLUMNS;
-        int h = w * 9 / 16;
-        LinearLayout row = null;
-        int i = 0;
-        for (AppTile.App app : apps.values()) {
-            if (i % COLUMNS == 0) {
-                row = new LinearLayout(this);
-                row.setClipChildren(false);
-                LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
-                if (i > 0) rp.topMargin = px(74);
-                grid.addView(row, rp);
-            }
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(w, h);
-            if (i % COLUMNS > 0) lp.leftMargin = px(GAP);
-            row.addView(tile(app), lp);
-            i++;
-        }
+        int n = favoritesRow.getChildCount();
+        favoritesRow.getLayoutParams().width = n * tileW + (n - 1) * px(GAP);
+        favoritesRow.requestLayout();
     }
 
     private AppTile tile(AppTile.App app) {
@@ -365,11 +360,12 @@ public class MainActivity extends Activity {
         return t;
     }
 
+    /** The first favorite, or the way into every app when there are none yet. */
     private void focusFirst() {
-        View first = favoritesRow.getChildCount() > 0 && favoritesRow.getChildAt(0).isFocusable()
-                ? favoritesRow.getChildAt(0)
-                : grid.getChildCount() > 0 ? ((ViewGroup) grid.getChildAt(0)).getChildAt(0) : null;
-        if (first != null) first.post(first::requestFocus);
+        int n = favoritesRow.getChildCount();
+        if (n == 0) return;
+        View first = favoritesRow.getChildAt(n > 1 ? 1 : 0);
+        first.post(first::requestFocus);
     }
 
     /**
@@ -392,16 +388,84 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ---- Every app ----
+
+    private void openApps() {
+        if (appsLayer != null) return;
+        appsLayer = new FrameLayout(this);
+        ScrollView scroll = new ScrollView(this) {
+            @Override protected void onScrollChanged(int l, int t, int ol, int ot) {
+                super.onScrollChanged(l, t, ol, ot);
+                GlassView.refresh(this);
+            }
+        };
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setClipChildren(false);
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setClipChildren(false);
+        column.setClipToPadding(false);
+        column.setPadding(px(SIDE), px(56), px(SIDE), px(120));
+        TextView title = text(64, "sans-serif-light", 0xFFFFFFFF);
+        title.setText("Apps");
+        column.addView(title);
+        grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        grid.setClipChildren(false);
+        grid.setClipToPadding(false);
+        grid.setPadding(0, px(40), 0, 0);
+        column.addView(grid);
+        scroll.addView(column, new FrameLayout.LayoutParams(-1, -2));
+        appsLayer.addView(scroll, match());
+
+        home.setVisibility(View.INVISIBLE);
+        root.addView(appsLayer, match());
+        buildGrid();
+        View first = ((ViewGroup) grid.getChildAt(0)).getChildAt(0);
+        first.post(first::requestFocus);
+    }
+
+    private void buildGrid() {
+        grid.removeAllViews();
+        LinearLayout row = null;
+        int i = 0;
+        for (AppTile.App app : apps.values()) {
+            if (i % COLUMNS == 0) {
+                row = new LinearLayout(this);
+                row.setClipChildren(false);
+                LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+                if (i > 0) rp.topMargin = px(74);
+                grid.addView(row, rp);
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileW, tileH);
+            if (i % COLUMNS > 0) lp.leftMargin = px(GAP);
+            row.addView(tile(app), lp);
+            i++;
+        }
+    }
+
+    private void closeApps() {
+        if (appsLayer == null) return;
+        root.removeView(appsLayer);
+        appsLayer = null;
+        grid = null;
+        home.setVisibility(View.VISIBLE);
+        favoritesRow.getChildAt(0).requestFocus();
+    }
+
     // ---- The menu for one app ----
 
     private void openSheet(AppTile tile) {
         AppTile.App app = tile.app;
+        if (app.component == null) return;
         String pkg = app.component.getPackageName();
         List<String> favs = favorites();
         int at = favs.indexOf(pkg);
 
-        sheetReturnFocus = tile;
-        scroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        sheetPackage = pkg;
+        sheetBlocks = appsLayer != null ? appsLayer : home;
+        sheetBlocks.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         sheet = new FrameLayout(this);
         sheet.setBackgroundColor(0x80000000);
         sheet.setClickable(true);
@@ -437,11 +501,12 @@ public class MainActivity extends Activity {
 
     private void sheetButton(LinearLayout list, String label, Runnable action) {
         View b = pill(label, () -> {
+            if (action != null) {
+                action.run();
+                buildFavorites();
+                if (appsLayer != null) buildGrid();
+            }
             closeSheet();
-            if (action == null) return;
-            action.run();
-            buildRows();
-            focusFirst();
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, px(84));
         lp.topMargin = px(16);
@@ -453,41 +518,55 @@ public class MainActivity extends Activity {
         saveFavorites(favs);
     }
 
+    /** Closes the menu and puts focus back on the app's card, wherever it ended up. */
     private void closeSheet() {
         if (sheet == null) return;
         root.removeView(sheet);
         sheet = null;
-        scroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        if (sheetReturnFocus != null && sheetReturnFocus.isAttachedToWindow()) sheetReturnFocus.requestFocus();
-        sheetReturnFocus = null;
+        sheetBlocks.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        View back = findTile(sheetBlocks, sheetPackage);
+        if (back != null) back.requestFocus();
+        else if (sheetBlocks == home) focusFirst();
+    }
+
+    private static View findTile(View v, String pkg) {
+        if (v instanceof AppTile) {
+            AppTile.App app = ((AppTile) v).app;
+            return app.component != null && app.component.getPackageName().equals(pkg) ? v : null;
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                View found = findTile(g.getChildAt(i), pkg);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     // ---- Small builders ----
 
     /** A focusable glass button with a label. */
     private View pill(String label, Runnable action) {
-        GlassView g = new GlassView(this, u, px(36));
-        g.setFocusable(true);
-        g.setClickable(true);
         TextView t = text(28, "sans-serif-medium", 0xFFFFFFFF);
         t.setText(label);
         t.setGravity(Gravity.CENTER);
         t.setPadding(px(34), 0, px(34), 0);
-        g.addView(t, new FrameLayout.LayoutParams(-1, -1));
+        return button(t, action);
+    }
+
+    /** Puts content on a focusable glass button. */
+    private View button(View content, Runnable action) {
+        GlassView g = new GlassView(this, u, px(36));
+        g.setFocusable(true);
+        g.setClickable(true);
+        g.addView(content, new FrameLayout.LayoutParams(-1, -1));
         g.setOnClickListener(v -> action.run());
         g.setOnFocusChangeListener((v, focused) -> {
             g.setLit(focused);
             g.animate().scaleX(focused ? 1.05f : 1f).scaleY(focused ? 1.05f : 1f).setDuration(140).start();
         });
         return g;
-    }
-
-    private TextView section(String label) {
-        TextView t = text(30, "sans-serif-medium", 0xCCFFFFFF);
-        t.setText(label);
-        t.setLetterSpacing(0.02f);
-        t.setPadding(0, px(40), 0, 0);
-        return t;
     }
 
     private TextView text(float size, String family, int color) {
@@ -514,5 +593,37 @@ public class MainActivity extends Activity {
         f.addAction(Intent.ACTION_PACKAGE_CHANGED);
         f.addDataScheme("package");
         return f;
+    }
+
+    /** Nine rounded squares: the icon for every app. */
+    private static final class GridIcon extends Drawable {
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        GridIcon() {
+            p.setColor(0xE6FFFFFF);
+        }
+
+        @Override public void draw(Canvas c) {
+            Rect b = getBounds();
+            float cell = b.width() / 3f, gap = cell * 0.24f, r = cell * 0.22f;
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    float x = b.left + i * cell + gap / 2, y = b.top + j * cell + gap / 2;
+                    c.drawRoundRect(x, y, x + cell - gap, y + cell - gap, r, r, p);
+                }
+            }
+        }
+
+        @Override public void setAlpha(int alpha) {
+            p.setAlpha(alpha);
+        }
+
+        @Override public void setColorFilter(ColorFilter filter) {
+            p.setColorFilter(filter);
+        }
+
+        @Override public int getOpacity() {
+            return PixelFormat.TRANSLUCENT;
+        }
     }
 }

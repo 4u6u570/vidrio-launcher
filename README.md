@@ -1,9 +1,9 @@
-# Vidrio
+# Vidrio Launcher
 
 Launcher liviano para Android TV (Android 7 o más nuevo), con estilo de vidrio esmerilado al modo de Apple. El APK pesa unos 32 KB: está escrito en Java, sin bibliotecas y sin Gradle.
 
-- Reloj, fecha y estado de la red arriba; botón de Ajustes.
-- **Favoritos** y una grilla con todas las apps. Las apps de TV muestran su banner.
+- Reloj, fecha y estado de la red arriba; botón de Ajustes. El centro queda libre.
+- Abajo, una sola fila de **favoritos**. Empieza con **Todas las apps**, que abre la grilla con todo lo instalado. Cada app nueva se suma sola al final de la fila. Las apps de TV muestran su banner.
 - **OK** abre la app. **Mantener OK** (o la tecla Menú) abre el menú de la app: agregar o quitar de favoritos, reordenar, ver la información.
 - Configuración se abre encima del launcher, que queda visible detrás.
 
